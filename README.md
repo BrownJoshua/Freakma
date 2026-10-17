@@ -49,6 +49,10 @@ is built in, so you can ask for a screen in plain words and watch it appear.
   buttons and links (`href="#id"`, `href="page.html"`, `data-target`, `onclick="show('id')"`) become
   prototype links, drawn as wires. Popups sit on the screen that opens them, and their close or
   cancel buttons lead back. Flex and grid become auto layout; scripts never run.
+- **Live preview, side by side**: press **Preview** in the toolbar to see the screen you're
+  working on beside the canvas, in a phone or browser frame, updating as you edit. It follows the
+  screen you select; links are clickable so you can try the flow, and clicking anything else
+  selects it in the editor. Pop it out into its own window to put it on a second monitor.
 - **Wires**: on the Prototype tab, arrows show where every link goes. Select anything and drag its
   **+** handle onto a screen to link it, then press Play to click through.
 - **Reference library**: collect ideas in the Library tab. Drop or paste screenshots, capture whole

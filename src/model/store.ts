@@ -49,6 +49,8 @@ export interface State {
   openComment: string | null;
   peers: Record<string, Peer>;
   collab: { role: "off" | "host" | "guest"; status: string; address?: string; code?: string };
+  /** the live preview pane beside the canvas */
+  livePreview: boolean;
   /** draw prototype wires even outside the Prototype tab */
   showWires: boolean;
   /** which modal is open */
@@ -94,6 +96,13 @@ let state: State = {
   dialog: null,
   claudeDraft: null,
   showWires: false,
+  livePreview: (() => {
+    try {
+      return localStorage.getItem("freakma:live") === "1";
+    } catch {
+      return false;
+    }
+  })(),
   rev: 0,
 };
 
@@ -101,6 +110,11 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
 export const getState = () => state;
+/** run after every state change */
+export const subscribe = (fn: () => void) => {
+  listeners.add(fn);
+  return () => void listeners.delete(fn);
+};
 
 export function setState(patch: Partial<State> | ((s: State) => Partial<State>)) {
   const p = typeof patch === "function" ? patch(state) : patch;

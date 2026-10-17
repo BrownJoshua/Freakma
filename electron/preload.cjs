@@ -30,4 +30,5 @@ contextBridge.exposeInMainWorld("freakma", {
   refsDelete: (id) => ipcRenderer.invoke("refs-delete", id),
   refsData: (id) => ipcRenderer.invoke("refs-data", id),
   refsToProject: (id, dir) => ipcRenderer.invoke("refs-to-project", id, dir),
+  openPreview: () => ipcRenderer.invoke("open-preview"),
 });

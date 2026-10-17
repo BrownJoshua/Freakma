@@ -17,6 +17,7 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
   const tool = useStore((s) => s.tool);
   const peers = useStore((s) => s.peers);
   const collab = useStore((s) => s.collab);
+  const live = useStore((s) => s.livePreview);
 
   const play = () => {
     const s = getState();
@@ -122,6 +123,7 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
           )}
           Share
         </button>
+        <button type="button" className={live ? "on" : ""} title="Live preview beside the canvas (updates as you edit)" onClick={() => setState({ livePreview: !live })}><Ico name="eye" />Preview</button>
         <button type="button" onClick={onExport}><Ico name="download" />Export</button>
         <button type="button" className="primary" onClick={play} title="Play the prototype (F5)"><Ico name="play" />Play</button>
       </div>

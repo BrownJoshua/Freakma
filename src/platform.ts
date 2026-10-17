@@ -30,6 +30,7 @@ export interface Bridge {
   refsDelete(id: string): Promise<void>;
   refsData(id: string): Promise<string | null>;
   refsToProject(id: string, dir: string): Promise<string>;
+  openPreview(): Promise<void>;
 }
 
 export interface RefMeta {

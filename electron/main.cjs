@@ -280,3 +280,28 @@ ipcMain.handle("refs-to-project", async (_e, id, dir) => {
   fs.copyFileSync(path.join(refsDir(), `${r.id}.${r.ext}`), path.join(out, name));
   return `references/${name}`;
 });
+
+/* ---------------- live preview window (for a second monitor) ---------------- */
+
+let previewWin = null;
+ipcMain.handle("open-preview", async () => {
+  if (previewWin && !previewWin.isDestroyed()) return previewWin.focus();
+  // no preload: the preview only renders the design it is sent over a BroadcastChannel
+  previewWin = new BrowserWindow({
+    width: 520,
+    height: 940,
+    minWidth: 320,
+    minHeight: 400,
+    backgroundColor: "#1c1d20",
+    title: "Freakma · Live preview",
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  if (process.env.VITE_DEV_SERVER_URL) previewWin.loadURL(process.env.VITE_DEV_SERVER_URL + "#preview");
+  else previewWin.loadFile(path.join(__dirname, "..", "dist", "index.html"), { hash: "preview" });
+  previewWin.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+  previewWin.on("closed", () => (previewWin = null));
+});

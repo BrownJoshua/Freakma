@@ -13,6 +13,7 @@ import { frameOf, parentOf } from "./model/doc";
 import { isPositioned } from "./render/style";
 import { ImportDialog, ShareDialog } from "./ui/Dialogs";
 import { sendSelection } from "./collab/client";
+import { LivePreviewPane, startLiveBroadcast } from "./ui/LivePreview";
 import type { Tool } from "./model/store";
 
 const typing = (e: KeyboardEvent) => {
@@ -29,7 +30,15 @@ export function App() {
   const pageId = useStore((s) => s.pageId);
   useEffect(() => sendSelection(), [selection, pageId]);
 
+  const livePreview = useStore((s) => s.livePreview);
   useEffect(() => {
+    try {
+      localStorage.setItem("freakma:live", livePreview ? "1" : "0");
+    } catch {}
+  }, [livePreview]);
+
+  useEffect(() => {
+    startLiveBroadcast();
     initDesktop();
     setTimeout(zoomToFit, 120);
   }, []);
@@ -116,6 +125,7 @@ export function App() {
       <div className="main">
         <LeftPanel />
         <Canvas />
+        {livePreview && <LivePreviewPane />}
         <RightPanel />
       </div>
       {play && <Play />}
