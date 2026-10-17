@@ -75,8 +75,10 @@ is built in, so you can ask for a screen in plain words and watch it appear.
 
 Every push to `main` builds a Windows installer on GitHub Actions:
 **Actions → Windows installer → latest run → Artifacts → Freakma-Setup**.
-Unzip it and run `Freakma Setup x.y.z.exe`. The installer is not code-signed, so Windows
-SmartScreen asks once: choose **More info → Run anyway**.
+Unzip it and double-click `Freakma Setup x.y.z.exe`: it installs (or updates) in one step, with no
+questions and no admin prompt, and opens Freakma when done. Your designs and reference library are
+kept. The installer is not code-signed, so Windows SmartScreen asks once: choose
+**More info → Run anyway**.
 
 ### Option B: run from source
 
