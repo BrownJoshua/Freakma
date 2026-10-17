@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef } from "react";
 import type { Layout, Node, Theme } from "../model/types";
-import { nodeStyle } from "./style";
+import { nodeStyle, vectorSvg } from "./style";
 import { iconSvg } from "./icons";
 
 export interface EditCtx {
@@ -65,6 +65,9 @@ export function NodeView({ id, nodes, theme, parentLayout, top }: Props) {
   }
   if (n.type === "icon") {
     return <span data-node-id={id} style={style} dangerouslySetInnerHTML={{ __html: iconSvg(n.icon ?? "box", n.w, "currentColor") }} />;
+  }
+  if (n.type === "vector") {
+    return <div data-node-id={id} style={style} dangerouslySetInnerHTML={{ __html: vectorSvg(n, theme) }} />;
   }
   if (n.type === "image") {
     return (

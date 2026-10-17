@@ -16,6 +16,31 @@ is built in, so you can ask for a screen in plain words and watch it appear.
   line height, alignment, icons, images.
 - **Themes**: five starting styles (Steel, Material, Minimal, Warm, Dark). Edit the colours,
   fonts, text sizes and corner sizes once and the whole design follows.
+- **Free position when you want it**: switch any container (or draw a frame with **F**) to
+  *Free* and place things anywhere, like a plain Figma frame, with smart guides that snap to
+  edges and centres. Any single element can also *ignore auto layout* to float (badges, FABs).
+  X/Y, rotation, align and distribute are in the inspector; arrow keys nudge.
+- **Box select**: drag across empty canvas to select screens, or across a screen's background
+  to select what's inside it.
+- **Drawing**: rectangle, ellipse, line, arrow, **pen** (click for corners, drag for curves,
+  click the first point to close) and **pencil** (freehand, smoothed). Double-click a path to
+  edit its points and curve handles.
+- **Live together**: *Share → Start a live session* hosts the design from your computer; anyone
+  on the same network joins with your address and a 6-letter code. Everyone sees each other's
+  cursors and selections, and edits appear instantly.
+- **Comments**: press **C** and click anywhere to leave a note; reply, resolve, and jump to them
+  from the Notes tab. Claude Code can read and resolve them too.
+- **Import from Figma**: paste a Figma file link (or a link to one frame) and your personal access
+  token. Auto-layout frames stay auto layout; text, colours, gradients, corners, shadows, images and
+  vector shapes come across. A saved Figma API `.json` also works offline.
+- **Import HTML**: paste HTML, open an `.html` file, or give a website address (desktop app).
+  Flex and grid become auto layout, positioned elements become free layers, text keeps its fonts.
+- **Reference library**: collect ideas in the Library tab. Drop or paste screenshots, capture whole
+  websites (screenshot + HTML), save any selection, keep HTML snippets and links, sort them into
+  boards with tags. Then drag a reference onto the canvas, **trace over it** (locked, see-through),
+  convert a captured page into an editable design, turn its colours into your theme, or press
+  **Recreate with Claude** to have Claude Code rebuild it as a real screen. The library is shared by
+  all your projects.
 - **Layers and pages**: rename, hide, lock and drag to reorder.
 - **Components**: save any element as a reusable component, then update every copy at once.
 - **Prototype**: link any element to another screen and press Play to click through.
@@ -60,6 +85,16 @@ watches the file and shows Claude's changes as soon as they are saved.
 Claude runs with permission to read and edit files in the project folder only
 (`Read, Edit, Write, Glob, Grep`). It cannot run commands.
 
+## Working together
+
+1. One person opens the design and picks **Share → Start a live session** (desktop app).
+   Windows may ask to allow Freakma through the firewall for private networks: allow it.
+2. They send the **address** (e.g. `192.168.1.20:4848`) and **code** shown.
+3. Everyone else picks **Share**, types their name, the address and code, and presses **Join**.
+
+Sessions work on the same office network, LAN or VPN; nothing is sent to the internet. When the
+host stops the session, everyone keeps a copy of the design.
+
 ## Keyboard
 
 | Keys | Action |
@@ -70,8 +105,15 @@ Claude runs with permission to read and edit files in the project folder only
 | Ctrl G (Shift for a row) | Group into a stack |
 | Alt ↑ / Alt ↓ | Move earlier / later |
 | Esc · Enter | Select parent · select inside (or edit text) |
-| T · B · P | Add text · add button · play |
-| Space + drag, or drag empty canvas | Pan |
+| V · H | Select · hand (pan) |
+| F · R · O | Frame · rectangle · ellipse |
+| L · Shift L | Line · arrow |
+| P · Shift P | Pen · pencil |
+| T · C | Text · comment |
+| B · F5 | Add a button · play |
+| Arrows (Shift for 10px) | Nudge free-positioned items and screens |
+| Alt while dragging · Shift while dragging | No snapping · straight line |
+| Space + drag, middle mouse | Pan |
 | Ctrl + scroll | Zoom |
 | Shift 1 | Zoom to fit |
 | Ctrl S · Ctrl E | Save · export |

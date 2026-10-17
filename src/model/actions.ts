@@ -1,6 +1,6 @@
 import type { Doc, Fragment, Node } from "./types";
 import {
-  DEVICES, duplicate, extract, frameOf, insertFragment, isContainer, makeFrame, moveNode, nextFramePosition, normalize, pageOf, parentOf, removeNode, reId, uid, wrap,
+  DEVICES, duplicate, extract, newDoc, frameOf, insertFragment, isContainer, makeFrame, moveNode, nextFramePosition, normalize, pageOf, parentOf, removeNode, reId, uid, wrap,
 } from "./doc";
 import { commit, getClipboard, getState, insertionParent, loadDoc, page, select, setClipboard, setDiskSaver, setState, toast, flushSave } from "./store";
 import type { PartDef } from "../parts/library";
@@ -70,12 +70,15 @@ function partInNewFrame(doc: Doc, part: PartDef, frag: Fragment, at?: { x: numbe
   return { frame: f.id, root };
 }
 
-export function insertPart(part: PartDef, target?: { parentId: string; index: number } | null, at?: { x: number; y: number }) {
+export function insertPart(part: PartDef, target?: { parentId: string; index: number; at?: { x: number; y: number } } | null, at?: { x: number; y: number }) {
   const frag = part.make();
   let sel = "";
   commit((doc) => {
     const t = part.screen ? null : target ?? insertionParentIn(doc);
-    if (t && doc.nodes[t.parentId]) sel = insertFragment(doc, frag, t.parentId, t.index);
+    if (t && doc.nodes[t.parentId]) {
+      sel = insertFragment(doc, frag, t.parentId, t.index);
+      placeAt(doc, sel, t);
+    }
     else {
       const r = partInNewFrame(doc, part, frag, at);
       sel = part.screen ? r.frame : r.root;
@@ -83,6 +86,19 @@ export function insertPart(part: PartDef, target?: { parentId: string; index: nu
   });
   select([sel]);
   if (part.screen || !target) setTimeout(() => focusIfOffscreen(sel), 30);
+}
+
+/** a node dropped into a free container lands where it was dropped, at a sensible size */
+export function placeAt(doc: Doc, id: string, t: { parentId?: string; at?: { x: number; y: number } }) {
+  if (!t.at) return;
+  const n = doc.nodes[id];
+  n.x = t.at.x;
+  n.y = t.at.y;
+  if (n.wMode === "fill") {
+    n.wMode = "fixed";
+    n.w = Math.max(n.w, 360);
+  }
+  if (n.hMode === "fill") n.hMode = "hug";
 }
 
 function insertionParentIn(doc: Doc) {
@@ -98,7 +114,7 @@ function focusIfOffscreen(id: string) {
   if (r.right < s.left || r.left > s.right || r.bottom < s.top || r.top > s.bottom) focusNode(id);
 }
 
-export function insertComponent(compId: string, target?: { parentId: string; index: number } | null) {
+export function insertComponent(compId: string, target?: { parentId: string; index: number; at?: { x: number; y: number } } | null) {
   const comp = getState().doc.components.find((c) => c.id === compId);
   if (!comp) return;
   let sel = "";
@@ -107,6 +123,7 @@ export function insertComponent(compId: string, target?: { parentId: string; ind
     if (!t) return;
     sel = insertFragment(doc, comp.fragment, t.parentId, t.index);
     doc.nodes[sel].component = comp.id;
+    placeAt(doc, sel, t);
   });
   if (sel) select([sel]);
   else toast("Add a screen first, then drop components into it");
@@ -357,10 +374,8 @@ export async function reloadFromDisk() {
 }
 
 export function newDesign() {
-  import("./doc").then(({ newDoc }) => {
-    loadDoc(newDoc(), { projectDir: null });
-    setState({ selection: [] });
-  });
+  loadDoc(newDoc(), { projectDir: null });
+  setState({ selection: [] });
 }
 
 export function downloadDoc() {
@@ -380,3 +395,146 @@ export function downloadText(name: string, data: string, type = "text/plain") {
 
 export const deviceList = Object.entries(DEVICES);
 export { isContainer, pageOf };
+
+/* ---------------- free layout ---------------- */
+
+const stageQ = (id: string) => document.querySelector(`.stage [data-node-id="${CSS.escape(id)}"]`) as HTMLElement | null;
+
+/** measured box of a child relative to its parent, in design pixels */
+export function measure(id: string, parentId: string) {
+  const z = getState().view.zoom;
+  const r = stageQ(id)?.getBoundingClientRect(), pr = stageQ(parentId)?.getBoundingClientRect();
+  if (!r || !pr) return null;
+  return { x: Math.round((r.left - pr.left) / z), y: Math.round((r.top - pr.top) / z), w: Math.round(r.width / z), h: Math.round(r.height / z) };
+}
+
+/** switch a container to free layout without anything jumping: every child keeps its spot */
+export function makeFree(id: string) {
+  const s = getState();
+  const n = s.doc.nodes[id];
+  if (!n?.layout) return;
+  const self = stageQ(id)?.getBoundingClientRect();
+  const z = s.view.zoom;
+  const boxes = Object.fromEntries(n.children.map((c) => [c, measure(c, id)]));
+  commit((d) => {
+    const m = d.nodes[id];
+    m.layout = { ...m.layout!, mode: "free" };
+    if (self && m.hMode !== "fixed") {
+      m.h = Math.round(self.height / z);
+      m.hMode = "fixed";
+    }
+    for (const c of m.children) {
+      const b = boxes[c];
+      const k = d.nodes[c];
+      if (!b || !k) continue;
+      Object.assign(k, { x: b.x, y: b.y });
+      delete k.abs;
+      if (k.wMode === "fill") Object.assign(k, { wMode: "fixed", w: b.w });
+      if (k.hMode === "fill") Object.assign(k, { hMode: "fixed", h: b.h });
+    }
+  });
+}
+
+/** take a node out of (or back into) its parent's auto layout */
+export function setAbsolute(ids: string[], on: boolean) {
+  const s = getState();
+  const pos = Object.fromEntries(ids.map((id) => [id, parentOf(s.doc, id) ? measure(id, parentOf(s.doc, id)!.id) : null]));
+  commit((d) => {
+    for (const id of ids) {
+      const n = d.nodes[id];
+      if (!n) continue;
+      if (on) {
+        const b = pos[id];
+        n.abs = true;
+        if (b) Object.assign(n, { x: b.x, y: b.y });
+        if (b && n.wMode === "fill") Object.assign(n, { wMode: "fixed", w: b.w });
+      } else {
+        delete n.abs;
+      }
+    }
+  });
+}
+
+/** align or distribute positioned items (free children or screens) */
+export function alignSelection(how: "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "hdist" | "vdist") {
+  const s = getState();
+  const ids = s.selection.filter((id) => s.doc.nodes[id]);
+  if (!ids.length) return;
+  const first = s.doc.nodes[ids[0]];
+  const parent = parentOf(s.doc, ids[0]);
+  const z = s.view.zoom;
+  // boxes in the parent's coordinates (or world coordinates for screens)
+  const boxes = ids.map((id) => {
+    const n = s.doc.nodes[id];
+    if (n.type === "frame") {
+      const el = stageQ(id);
+      return { id, x: n.x ?? 0, y: n.y ?? 0, w: n.w, h: el ? el.offsetHeight : n.h };
+    }
+    return { id, ...(parent ? measure(id, parent.id)! : { x: 0, y: 0, w: 0, h: 0 }) };
+  });
+  let ref = boxes.reduce((r, b) => ({ x1: Math.min(r.x1, b.x), y1: Math.min(r.y1, b.y), x2: Math.max(r.x2, b.x + b.w), y2: Math.max(r.y2, b.y + b.h) }), { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
+  if (ids.length === 1 && parent && first.type !== "frame") {
+    const pr = stageQ(parent.id)!.getBoundingClientRect();
+    ref = { x1: 0, y1: 0, x2: pr.width / z, y2: pr.height / z };
+  }
+  const out: Record<string, { x?: number; y?: number }> = {};
+  if (how === "hdist" || how === "vdist") {
+    const key = how === "hdist" ? "x" : "y", size = how === "hdist" ? "w" : "h";
+    const sorted = [...boxes].sort((a, b) => a[key] - b[key]);
+    const total = sorted.reduce((t, b) => t + b[size], 0);
+    const span = (how === "hdist" ? ref.x2 - ref.x1 : ref.y2 - ref.y1) - total;
+    const gap = sorted.length > 1 ? span / (sorted.length - 1) : 0;
+    let cur = how === "hdist" ? ref.x1 : ref.y1;
+    for (const b of sorted) {
+      out[b.id] = { [key]: Math.round(cur) };
+      cur += b[size] + gap;
+    }
+  } else {
+    for (const b of boxes) {
+      if (how === "left") out[b.id] = { x: ref.x1 };
+      if (how === "right") out[b.id] = { x: ref.x2 - b.w };
+      if (how === "hcenter") out[b.id] = { x: Math.round((ref.x1 + ref.x2) / 2 - b.w / 2) };
+      if (how === "top") out[b.id] = { y: ref.y1 };
+      if (how === "bottom") out[b.id] = { y: ref.y2 - b.h };
+      if (how === "vcenter") out[b.id] = { y: Math.round((ref.y1 + ref.y2) / 2 - b.h / 2) };
+    }
+  }
+  commit((d) => {
+    for (const b of boxes) {
+      const n = d.nodes[b.id];
+      const p = parentOf(d, b.id);
+      const positioned = n.type === "frame" || n.abs || p?.layout?.mode === "free";
+      if (!positioned) {
+        n.abs = true;
+        n.x = b.x;
+        n.y = b.y;
+      }
+      Object.assign(n, out[b.id]);
+    }
+  });
+}
+
+/** after a vector's points move, refit its box so selection and layout stay tight */
+export function renormalizeVector(doc: Doc, id: string) {
+  const n = doc.nodes[id];
+  if (!n?.points?.length) return;
+  const vw = n.vw || n.w, vh = n.vh || n.h;
+  const sx = n.w / vw, sy = n.h / vh;
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const p of n.points) for (const [x, y] of [[p.x, p.y], [p.ix, p.iy], [p.ox, p.oy]]) {
+    if (x === undefined || y === undefined) continue;
+    x1 = Math.min(x1, x); y1 = Math.min(y1, y); x2 = Math.max(x2, x); y2 = Math.max(y2, y);
+  }
+  const bw = Math.max(1, x2 - x1), bh = Math.max(1, y2 - y1);
+  n.points = n.points.map((p) => ({
+    x: p.x - x1, y: p.y - y1,
+    ...(p.ix !== undefined ? { ix: p.ix - x1, iy: p.iy! - y1 } : {}),
+    ...(p.ox !== undefined ? { ox: p.ox - x1, oy: p.oy! - y1 } : {}),
+  }));
+  n.x = Math.round((n.x ?? 0) + x1 * sx);
+  n.y = Math.round((n.y ?? 0) + y1 * sy);
+  n.w = Math.max(1, Math.round(bw * sx));
+  n.h = Math.max(1, Math.round(bh * sy));
+  n.vw = bw;
+  n.vh = bh;
+}

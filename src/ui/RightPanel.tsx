@@ -5,8 +5,9 @@ import { DEVICES, defaultLayout, frameOf, parentOf } from "../model/doc";
 import { textSpec, FONT_CHOICES } from "../model/theme";
 import { ICON_NAMES } from "../render/icons";
 import {
-  deleteSelection, detachComponent, duplicateSelection, makeComponent, patch, patchFn, reloadFromDisk, saveAsProject, selectParent, syncComponent, wrapSelection,
+  alignSelection, deleteSelection, detachComponent, duplicateSelection, makeComponent, makeFree, patch, patchFn, reloadFromDisk, saveAsProject, selectParent, setAbsolute, syncComponent, wrapSelection,
 } from "../model/actions";
+import { isPositioned } from "../render/style";
 import { ColorPick, Ico, Num, Row, Section, Seg, Select, Text } from "./controls";
 import { bridge } from "../platform";
 import type { ClaudeEvent } from "../platform";
@@ -65,8 +66,11 @@ function Inspector() {
         </Section>
       )}
 
+      {(nodes.length > 1 || (!isTop && parent && isPositioned(n, parent.layout))) && <AlignSection multi={nodes.length > 1} />}
+      {!isTop && parent && <PositionSection n={n} ids={ids} parent={parent} />}
       <SizeSection n={n} ids={ids} isTop={isTop} />
       {n.layout && <LayoutSection n={n} ids={ids} />}
+      {n.type === "vector" && <VectorSection n={n} ids={ids} t={t} />}
       {!n.layout && (n.type === "box" || n.type === "frame") && (
         <Section title="Auto layout">
           <button type="button" className="wide" onClick={() => patch(ids, { layout: defaultLayout("column", 12, 0) })}>Turn on auto layout</button>
@@ -75,7 +79,7 @@ function Inspector() {
       {n.type === "text" && <TextSection n={n} ids={ids} t={t} />}
       {n.type === "icon" && <IconSection n={n} ids={ids} t={t} />}
       {n.type === "image" && <ImageSection n={n} ids={ids} />}
-      {n.type !== "text" && n.type !== "icon" && <FillSection n={n} ids={ids} t={t} />}
+      {n.type !== "text" && n.type !== "icon" && n.type !== "vector" && <FillSection n={n} ids={ids} t={t} />}
       <EffectsSection n={n} ids={ids} t={t} />
 
       {!isTop && (
@@ -98,6 +102,91 @@ function Inspector() {
   );
 }
 
+function AlignSection({ multi }: { multi: boolean }) {
+  const b = (how: Parameters<typeof alignSelection>[0], icon: string, title: string) => (
+    <button type="button" title={title} onClick={() => alignSelection(how)}><Ico name={icon} size={16} /></button>
+  );
+  return (
+    <Section title="Align">
+      <div className="align-row">
+        {b("left", "align-left", "Align left")}
+        {b("hcenter", "align-hcenter", "Align centres horizontally")}
+        {b("right", "align-right", "Align right")}
+        {b("top", "align-top", "Align top")}
+        {b("vcenter", "align-vcenter", "Align middles")}
+        {b("bottom", "align-bottom", "Align bottom")}
+        {multi && b("hdist", "dist-h", "Spread evenly across")}
+        {multi && b("vdist", "dist-v", "Spread evenly down")}
+      </div>
+      {!multi && <p className="hint">Aligns to the parent.</p>}
+    </Section>
+  );
+}
+
+function PositionSection({ n, ids, parent }: { n: Node; ids: string[]; parent: Node }) {
+  const freeParent = parent.layout?.mode === "free";
+  const positioned = isPositioned(n, parent.layout);
+  return (
+    <Section title="Position">
+      {positioned ? (
+        <Row label="X · Y">
+          <Num value={n.x ?? 0} onChange={(v) => patch(ids, { x: v })} suffix="X" />
+          <Num value={n.y ?? 0} onChange={(v) => patch(ids, { y: v })} suffix="Y" />
+        </Row>
+      ) : (
+        <p className="hint">Placed by “{parent.name}”'s auto layout. Drag it to reorder.</p>
+      )}
+      <Row label="Rotation">
+        <Num value={n.rotation ?? 0} min={-360} max={360} onChange={(v) => patchFn(ids, (x) => { if (v) x.rotation = v; else delete x.rotation; })} suffix="°" />
+        <div className="chips">
+          {[0, 90, 180, -90].map((r) => <button type="button" key={r} className={(n.rotation ?? 0) === r ? "on" : ""} onClick={() => patchFn(ids, (x) => { if (r) x.rotation = r; else delete x.rotation; })}>{r}°</button>)}
+        </div>
+      </Row>
+      {!freeParent && (
+        <Row label="Auto layout">
+          <Seg
+            value={n.abs ? "free" : "flow"}
+            options={[{ v: "flow", label: "Follow", title: "Let the parent's auto layout place it" }, { v: "free", label: "Ignore", title: "Take it out of the auto layout and place it anywhere (badges, floating buttons, overlays)" }]}
+            onChange={(v) => setAbsolute(ids, v === "free")}
+          />
+        </Row>
+      )}
+      {positioned && !freeParent && <p className="hint">Floating above the layout. Drag it anywhere inside “{parent.name}”.</p>}
+    </Section>
+  );
+}
+
+function VectorSection({ n, ids, t }: { n: Node; ids: string[]; t: Theme }) {
+  const isPath = !!n.points;
+  return (
+    <Section title="Shape">
+      {isPath && (
+        <>
+          <button type="button" className="wide" onClick={() => setState({ editPath: n.id, selection: [n.id] })}><Ico name="pen" size={14} />Edit points (or double-click)</button>
+          <Row label="Path">
+            <Seg value={n.closed ? "c" : "o"} options={[{ v: "o", label: "Open" }, { v: "c", label: "Closed" }]} onChange={(v) => patch(ids, { closed: v === "c" })} />
+          </Row>
+          {!n.closed && (
+            <Row label="Arrow">
+              <Seg value={n.arrow ?? "none"} options={[{ v: "none", label: "None" }, { v: "end", label: "End" }, { v: "both", label: "Both" }]} onChange={(v) => patch(ids, { arrow: v })} />
+            </Row>
+          )}
+        </>
+      )}
+      <Row label="Stroke">
+        <Num value={n.stroke ? n.strokeWidth ?? 2 : 0} min={0} max={64} onChange={(v) => patchFn(ids, (x) => { x.strokeWidth = v; if (v > 0 && !x.stroke) x.stroke = "$text"; if (v === 0) delete x.stroke; })} suffix="px" />
+      </Row>
+      {n.stroke && <ColorPick value={n.stroke} theme={t} allowNone={false} onChange={(v) => patch(ids, { stroke: v })} />}
+      {(n.closed || n.d !== undefined) && (
+        <>
+          <div className="sub">Fill</div>
+          <ColorPick value={n.fill} theme={t} onChange={(v) => patch(ids, { fill: v })} />
+        </>
+      )}
+    </Section>
+  );
+}
+
 function Nothing() {
   return (
     <div className="nothing">
@@ -108,7 +197,8 @@ function Nothing() {
         <li><b>Click</b> once to pick a part, again to go inside it</li>
         <li><b>Double-click</b> text to type</li>
         <li><b>Drag</b> a selected item to move it; it snaps into the layout</li>
-        <li><b>Space + drag</b> or empty-area drag to pan, <b>Ctrl + scroll</b> to zoom</li>
+        <li><b>Drag</b> across empty canvas to select many</li>
+        <li><b>Space + drag</b> or middle mouse to pan, <b>Ctrl + scroll</b> to zoom</li>
       </ul>
       <h3>Shortcuts</h3>
       <ul className="keys">
@@ -118,7 +208,10 @@ function Nothing() {
         <li><kbd>Ctrl G</kbd> group into a stack</li>
         <li><kbd>Alt ↑ ↓</kbd> move earlier or later</li>
         <li><kbd>Esc</kbd> select parent · <kbd>Enter</kbd> select inside</li>
-        <li><kbd>T</kbd> add text · <kbd>B</kbd> add button · <kbd>P</kbd> play</li>
+        <li><kbd>V</kbd> select · <kbd>H</kbd> hand · <kbd>F</kbd> frame</li>
+        <li><kbd>R</kbd> rectangle · <kbd>O</kbd> ellipse · <kbd>L</kbd> line · <kbd>Shift L</kbd> arrow</li>
+        <li><kbd>P</kbd> pen · <kbd>Shift P</kbd> pencil · <kbd>T</kbd> text · <kbd>C</kbd> comment</li>
+        <li><kbd>B</kbd> add button · <kbd>F5</kbd> play · <kbd>Arrows</kbd> nudge</li>
       </ul>
     </div>
   );
@@ -154,13 +247,24 @@ function LayoutSection({ n, ids }: { n: Node; ids: string[] }) {
   return (
     <Section title="Auto layout" right={<button type="button" className="mini" onClick={() => patch(ids, { layout: undefined })} title="Turn off">Off</button>}>
       <Row label="Direction">
-        <Seg value={L.mode} options={[{ v: "column", icon: "arrow-right", title: "Stack vertically", label: "Down" }, { v: "row", icon: "arrow-right", title: "Side by side", label: "Across" }, { v: "grid", icon: "grid", title: "Grid", label: "Grid" }]} onChange={(v) => set({ mode: v })} />
+        <Seg
+          value={L.mode}
+          options={[
+            { v: "column", title: "Stack vertically", label: "Down" },
+            { v: "row", title: "Side by side", label: "Across" },
+            { v: "grid", title: "Grid", label: "Grid" },
+            { v: "free", title: "Free position: put things anywhere, like a plain Figma frame", label: "Free" },
+          ]}
+          onChange={(v) => (v === "free" ? ids.forEach(makeFree) : set({ mode: v }))}
+        />
       </Row>
+      {L.mode === "free" && <p className="hint">Children sit wherever you drag them. Hold Alt while dragging to turn off snapping, Shift to move in a straight line.</p>}
       {L.mode === "grid" && (
         <Row label="Columns">
           <Num value={L.columns} min={1} max={12} onChange={(v) => set({ columns: v })} />
         </Row>
       )}
+      {L.mode !== "free" && <>
       <Row label="Gap">
         <Num value={L.gap} min={0} onChange={(v) => set({ gap: v })} suffix="px" />
         <div className="chips">{[0, 8, 16, 24, 32].map((g) => <button type="button" key={g} className={L.gap === g ? "on" : ""} onClick={() => set({ gap: g })}>{g}</button>)}</div>
@@ -193,6 +297,7 @@ function LayoutSection({ n, ids }: { n: Node; ids: string[] }) {
           <Seg value={L.wrap ? "y" : "n"} options={[{ v: "n", label: "One line" }, { v: "y", label: "Wrap" }]} onChange={(v) => set({ wrap: v === "y" })} />
         </Row>
       )}
+      </>}
     </Section>
   );
 }
@@ -212,8 +317,9 @@ function TextSection({ n, ids, t }: { n: Node; ids: string[]; t: Theme }) {
         <Num value={spec.size} min={6} max={200} onChange={(v) => patch(ids, { fontSize: v })} suffix="px" />
         <Select value={String(spec.weight)} options={[300, 400, 500, 600, 700, 800].map((w) => ({ v: String(w), label: ({ 300: "Light", 400: "Regular", 500: "Medium", 600: "Semibold", 700: "Bold", 800: "Extra bold" } as Record<number, string>)[w] }))} onChange={(v) => patch(ids, { fontWeight: Number(v) })} />
       </Row>
-      <Row label="Line height">
+      <Row label="Line · letter">
         <Num value={spec.lineHeight} min={0.8} max={3} step={0.05} onChange={(v) => patch(ids, { lineHeight: v })} />
+        <Num value={n.letterSpacing ?? t.text[n.textStyle ?? "body"]?.letterSpacing ?? 0} min={-5} max={20} step={0.1} onChange={(v) => patch(ids, { letterSpacing: v })} suffix="px" />
       </Row>
       <Row label="Align">
         <Seg value={n.textAlign ?? "left"} options={[{ v: "left", label: "Left" }, { v: "center", label: "Center" }, { v: "right", label: "Right" }]} onChange={(v) => patch(ids, { textAlign: v })} />
@@ -294,8 +400,9 @@ function EffectsSection({ n, ids, t }: { n: Node; ids: string[]; t: Theme }) {
         <Num value={typeof r === "number" ? r : undefined} min={0} onChange={(v) => patch(ids, { radius: v })} width={52} />
       </Row>
       <Row label="Shadow">
-        <Seg value={n.shadow ?? "none"} options={[{ v: "none", label: "None" }, { v: "sm", label: "S" }, { v: "md", label: "M" }, { v: "lg", label: "L" }]} onChange={(v) => patch(ids, { shadow: v })} />
+        <Seg value={n.shadowCss ? undefined : n.shadow ?? "none"} options={[{ v: "none", label: "None" }, { v: "sm", label: "S" }, { v: "md", label: "M" }, { v: "lg", label: "L" }]} onChange={(v) => patchFn(ids, (x) => { x.shadow = v; delete x.shadowCss; })} />
       </Row>
+      {n.shadowCss && <p className="hint" title={n.shadowCss}>Custom shadow from an import. Pick a size above to replace it.</p>}
       <Row label="Opacity">
         <input type="range" min={0} max={1} step={0.05} value={n.opacity ?? 1} onChange={(e) => patch(ids, { opacity: Number(e.target.value) })} />
         <span className="val">{Math.round((n.opacity ?? 1) * 100)}%</span>
@@ -382,6 +489,13 @@ function ClaudeTab() {
   const [log, setLog] = useState<LogLine[]>([]);
   const [check, setCheck] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const draft = useStore((s) => s.claudeDraft);
+  useEffect(() => {
+    if (!draft) return;
+    setPrompt(draft);
+    setUseSel(false);
+    setState({ claudeDraft: null });
+  }, [draft]);
 
   useEffect(() => {
     if (!bridge) return;

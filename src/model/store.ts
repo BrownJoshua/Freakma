@@ -1,8 +1,20 @@
 import { useSyncExternalStore } from "react";
 import type { Doc, Fragment, Node } from "./types";
 import { allFrames, newDoc, normalize, parentOf } from "./doc";
+import { applyPatch, diff } from "./patch";
+import type { Patch } from "./patch";
 
-export type LeftTab = "parts" | "layers" | "theme";
+export type LeftTab = "parts" | "layers" | "library" | "theme" | "comments";
+export type Tool = "select" | "hand" | "frame" | "rect" | "ellipse" | "line" | "arrow" | "pen" | "pencil" | "text" | "comment";
+
+export interface Peer {
+  id: string;
+  name: string;
+  color: string;
+  cursor?: { x: number; y: number };
+  selection: string[];
+  page?: string;
+}
 export type RightTab = "design" | "prototype" | "claude";
 
 export interface DropHint {
@@ -10,6 +22,8 @@ export interface DropHint {
   index: number;
   /** indicator line in stage coordinates */
   line: { x: number; y: number; w: number; h: number };
+  /** drop point inside a free container, in its own coordinates */
+  at?: { x: number; y: number };
 }
 
 export interface State {
@@ -26,6 +40,19 @@ export interface State {
   projectDir: string | null;
   saved: boolean;
   toast: string | null;
+  tool: Tool;
+  /** smart-guide lines while dragging, in stage pixels */
+  guides: { x: number[]; y: number[] };
+  marquee: { x: number; y: number; w: number; h: number } | null;
+  /** vector whose points are being edited */
+  editPath: string | null;
+  openComment: string | null;
+  peers: Record<string, Peer>;
+  collab: { role: "off" | "host" | "guest"; status: string; address?: string; code?: string };
+  /** which modal is open */
+  dialog: "import" | "share" | null;
+  /** text waiting to be put into the Claude prompt box */
+  claudeDraft: string | null;
   /** bumps on every change so overlays re-measure */
   rev: number;
 }
@@ -55,6 +82,15 @@ let state: State = {
   projectDir: null,
   saved: true,
   toast: null,
+  tool: "select",
+  guides: { x: [], y: [] },
+  marquee: null,
+  editPath: null,
+  openComment: null,
+  peers: {},
+  collab: { role: "off", status: "" },
+  dialog: null,
+  claudeDraft: null,
   rev: 0,
 };
 
@@ -79,12 +115,27 @@ export function useStore<T>(sel: (s: State) => T): T {
   );
 }
 
-/* ---------------- history ---------------- */
+/* ---------------- history ----------------
+ * Undo steps are patches (what changed), not whole snapshots, so undoing your own
+ * edit never throws away what a collaborator did elsewhere in the file. */
 
-const past: string[] = [];
-const future: string[] = [];
-let gestureStart: string | null = null;
-const snap = () => JSON.stringify(state.doc);
+interface Step {
+  fwd: Patch;
+  back: Patch;
+}
+const past: Step[] = [];
+const future: Step[] = [];
+let gestureStart: Doc | null = null;
+const clone = (d: Doc): Doc => JSON.parse(JSON.stringify(d));
+
+type ChangeListener = (p: Patch) => void;
+const changeListeners = new Set<ChangeListener>();
+/** fires for every local change (not for remote ones), e.g. to send it to collaborators */
+export const onLocalChange = (cb: ChangeListener) => {
+  changeListeners.add(cb);
+  return () => changeListeners.delete(cb);
+};
+const announce = (p: Patch) => changeListeners.forEach((l) => l(p));
 
 function changed() {
   scheduleSave();
@@ -92,66 +143,77 @@ function changed() {
 
 /** every edit goes through here: one undo step per call */
 export function commit(mutate: (doc: Doc) => void, extra?: Partial<State>) {
-  const before = snap();
-  const doc: Doc = JSON.parse(before);
+  const before = state.doc;
+  const doc = clone(before);
   mutate(doc);
-  const after = JSON.stringify(doc);
-  if (after === before) {
+  const d = diff(before, doc);
+  if (!d) {
     if (extra) setState(extra);
     return;
   }
   if (!gestureStart) {
-    past.push(before);
-    if (past.length > 150) past.shift();
+    past.push(d);
+    if (past.length > 200) past.shift();
     future.length = 0;
   }
   setState({ doc, saved: false, ...extra });
+  announce(d.fwd);
   changed();
 }
 
-/** live edits while dragging: no history until endGesture */
+/** live edits while dragging: one undo step for the whole gesture */
 export function beginGesture() {
-  if (!gestureStart) gestureStart = snap();
+  if (!gestureStart) gestureStart = clone(state.doc);
 }
 export function live(mutate: (doc: Doc) => void) {
-  const doc: Doc = JSON.parse(snap());
+  const before = state.doc;
+  const doc = clone(before);
   mutate(doc);
+  const d = diff(before, doc);
+  if (!d) return;
   setState({ doc, saved: false });
+  announce(d.fwd);
 }
 export function endGesture() {
-  if (gestureStart && gestureStart !== snap()) {
-    past.push(gestureStart);
-    future.length = 0;
-    changed();
+  if (gestureStart) {
+    const d = diff(gestureStart, state.doc);
+    if (d) {
+      past.push(d);
+      future.length = 0;
+      changed();
+    }
   }
   gestureStart = null;
 }
 
-export function undo() {
-  const prev = past.pop();
-  if (!prev) return;
-  future.push(snap());
-  const doc = JSON.parse(prev) as Doc;
+function step(from: Step[], to: Step[], dir: "fwd" | "back") {
+  const s = from.pop();
+  if (!s) return;
+  to.push(s);
+  const doc = applyPatch(clone(state.doc), s[dir]);
   setState({ doc, selection: state.selection.filter((id) => doc.nodes[id]), saved: false, editingText: null });
+  announce(s[dir]);
   changed();
 }
-export function redo() {
-  const next = future.pop();
-  if (!next) return;
-  past.push(snap());
-  const doc = JSON.parse(next) as Doc;
-  setState({ doc, selection: state.selection.filter((id) => doc.nodes[id]), saved: false, editingText: null });
-  changed();
-}
+export const undo = () => step(past, future, "back");
+export const redo = () => step(future, past, "fwd");
 export const canUndo = () => past.length > 0;
 export const canRedo = () => future.length > 0;
 
+/** an edit from a collaborator: applied as-is, not added to this person's undo */
+export function applyRemote(p: Patch) {
+  const doc = applyPatch(clone(state.doc), p);
+  setState({ doc, selection: state.selection.filter((id) => doc.nodes[id]) });
+  scheduleSave();
+}
+
 /** replace the whole document (open file, reload after Claude) */
-export function loadDoc(doc: Doc, opts: { keepHistory?: boolean; projectDir?: string | null } = {}) {
-  if (opts.keepHistory) {
-    past.push(snap());
+export function loadDoc(doc: Doc, opts: { keepHistory?: boolean; projectDir?: string | null; silent?: boolean } = {}) {
+  const d = diff(state.doc, doc);
+  if (opts.keepHistory && d) {
+    past.push(d);
     future.length = 0;
-  } else {
+  } else if (!opts.keepHistory) {
     past.length = 0;
     future.length = 0;
   }
@@ -164,6 +226,7 @@ export function loadDoc(doc: Doc, opts: { keepHistory?: boolean; projectDir?: st
     saved: true,
     ...(opts.projectDir !== undefined ? { projectDir: opts.projectDir } : {}),
   });
+  if (d && !opts.silent) announce(d.fwd);
   saveLocal();
 }
 

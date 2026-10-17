@@ -1,6 +1,6 @@
 /* What is being dragged from a panel right now. HTML5 drag events can't read
  * dataTransfer during dragover, so the source is kept here. */
-export type DragSource = { kind: "part"; id: string } | { kind: "component"; id: string } | { kind: "image"; } | null;
+export type DragSource = { kind: "part"; id: string } | { kind: "component"; id: string } | { kind: "ref"; id: string } | null;
 
 let current: DragSource = null;
 export const setDragSource = (d: DragSource) => (current = d);

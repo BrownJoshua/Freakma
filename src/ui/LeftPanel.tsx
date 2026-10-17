@@ -9,19 +9,34 @@ import { THEMES, FONT_CHOICES, COLOR_LABELS, cloneTheme } from "../model/theme";
 import { parentOf } from "../model/doc";
 import { setDragSource } from "./dragState";
 import { Ico, Num, Section, Select } from "./controls";
+import { LibraryTab } from "./Library";
+import { CommentsPanel } from "./Comments";
+
+const TAB_LABELS = { parts: "Parts", layers: "Layers", library: "Library", theme: "Theme", comments: "Notes" } as const;
+const TAB_TITLES = {
+  parts: "Ready-made parts for web and mobile",
+  layers: "Everything on the page, in order",
+  library: "Your reference library: images, websites, saved designs",
+  theme: "Colours, fonts and text styles",
+  comments: "Comments on this design",
+} as const;
 
 export function LeftPanel() {
   const tab = useStore((s) => s.leftTab);
+  const openComments = useStore((s) => (s.doc.comments ?? []).filter((c) => !c.resolved).length);
   return (
     <aside className="panel left">
       <div className="tabs">
-        {(["parts", "layers", "theme"] as const).map((t) => (
-          <button key={t} type="button" className={tab === t ? "on" : ""} onClick={() => setState({ leftTab: t })}>
-            {t === "parts" ? "Parts" : t === "layers" ? "Layers" : "Theme"}
+        {(["parts", "layers", "library", "theme", "comments"] as const).map((t) => (
+          <button key={t} type="button" className={tab === t ? "on" : ""} onClick={() => setState({ leftTab: t })} title={TAB_TITLES[t]}>
+            {TAB_LABELS[t]}
+            {t === "comments" && openComments > 0 && <small className="count">{openComments}</small>}
           </button>
         ))}
       </div>
-      <div className="panel-body">{tab === "parts" ? <PartsTab /> : tab === "layers" ? <LayersTab /> : <ThemeTab />}</div>
+      <div className="panel-body">
+        {tab === "parts" ? <PartsTab /> : tab === "layers" ? <LayersTab /> : tab === "library" ? <LibraryTab /> : tab === "comments" ? <CommentsPanel /> : <ThemeTab />}
+      </div>
     </aside>
   );
 }
@@ -29,7 +44,7 @@ export function LeftPanel() {
 /* ---------------- parts ---------------- */
 
 /** renders the real part at its natural size, then scales it to fit the tile */
-const Preview = memo(function Preview({ frag, theme, w }: { frag: Fragment; theme: Theme; w: number }) {
+export const Preview = memo(function Preview({ frag, theme, w }: { frag: Fragment; theme: Theme; w: number }) {
   const inner = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ s: number; x: number; y: number } | null>(null);
   useLayoutEffect(() => {

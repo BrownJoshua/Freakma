@@ -2,7 +2,7 @@
  * and edited by Claude Code. See src/claude/projectGuide.ts for the
  * human-readable description that ships with every project. */
 
-export type NodeType = "frame" | "box" | "text" | "image" | "icon";
+export type NodeType = "frame" | "box" | "text" | "image" | "icon" | "vector";
 
 /** fixed = exact pixels, fill = take the space the parent gives, hug = shrink to content */
 export type Sizing = "fixed" | "fill" | "hug";
@@ -11,7 +11,8 @@ export type Align = "start" | "center" | "end";
 export type Justify = "start" | "center" | "end" | "between";
 
 export interface Layout {
-  mode: "row" | "column" | "grid";
+  /** free = children sit at their own x/y (absolute), like a plain Figma frame */
+  mode: "row" | "column" | "grid" | "free";
   gap: number;
   /** top, right, bottom, left */
   padding: [number, number, number, number];
@@ -30,9 +31,14 @@ export interface Node {
   name: string;
   children: string[];
 
-  /** canvas position, top-level frames only */
+  /** canvas position for screens; position inside the parent for children of a
+   * free container or for nodes with abs = true */
   x?: number;
   y?: number;
+  /** ignore the parent's auto layout and sit at x/y */
+  abs?: boolean;
+  /** degrees, clockwise */
+  rotation?: number;
 
   w: number;
   h: number;
@@ -48,6 +54,8 @@ export interface Node {
   strokeWidth?: number;
   radius?: RadiusToken | number;
   shadow?: ShadowToken;
+  /** any CSS box-shadow, used instead of the shadow token (imports) */
+  shadowCss?: string;
   opacity?: number;
   clip?: boolean;
 
@@ -71,6 +79,19 @@ export interface Node {
   /* icon */
   icon?: string;
 
+  /* vector: points in a vw × vh box that scales to w × h */
+  points?: VectorPoint[];
+  closed?: boolean;
+  /** raw SVG path data instead of points (imports) */
+  d?: string;
+  vw?: number;
+  vh?: number;
+  arrow?: "none" | "end" | "both";
+  /** vector fill rule for paths with holes */
+  evenOdd?: boolean;
+  /** letter spacing override in px */
+  letterSpacing?: number;
+
   /** prototype: id of the frame to open when clicked in Play mode */
   link?: string;
 
@@ -83,6 +104,37 @@ export interface Node {
   component?: string;
   /** frames: which device preset they were made for */
   device?: string;
+}
+
+export interface VectorPoint {
+  x: number;
+  y: number;
+  /** incoming and outgoing curve handles (absent = sharp corner) */
+  ix?: number;
+  iy?: number;
+  ox?: number;
+  oy?: number;
+}
+
+export interface CommentReply {
+  author: string;
+  color: string;
+  text: string;
+  at: number;
+}
+
+export interface Comment {
+  id: string;
+  /** pinned to a screen (x/y relative to it) or to the canvas (world x/y) */
+  frame?: string;
+  x: number;
+  y: number;
+  author: string;
+  color: string;
+  text: string;
+  at: number;
+  resolved?: boolean;
+  replies: CommentReply[];
 }
 
 export interface TextStyle {
@@ -129,4 +181,5 @@ export interface Doc {
   pages: Page[];
   nodes: Record<string, Node>;
   components: Component[];
+  comments?: Comment[];
 }

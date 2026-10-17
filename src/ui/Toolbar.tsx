@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { canRedo, canUndo, commit, getState, redo, setState, undo, useStore } from "../model/store";
+import type { Tool } from "../model/store";
+import { getUser } from "../model/user";
 import { addFrame, deviceList, downloadDoc, newDesign, openProject, quickAdd, saveAsProject, zoomToFit } from "../model/actions";
 import { frameOf } from "../model/doc";
 import { Ico } from "./controls";
@@ -11,7 +13,10 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
   const dir = useStore((s) => s.projectDir);
   const zoom = useStore((s) => s.view.zoom);
   useStore((s) => s.rev);
-  const [menu, setMenu] = useState<"file" | "screen" | null>(null);
+  const [menu, setMenu] = useState<"file" | "screen" | "add" | null>(null);
+  const tool = useStore((s) => s.tool);
+  const peers = useStore((s) => s.peers);
+  const collab = useStore((s) => s.collab);
 
   const play = () => {
     const s = getState();
@@ -39,7 +44,9 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
               <button type="button" onClick={openProject}><Ico name="folder" />{isDesktop ? "Open project…" : "Open design file…"}</button>
               <button type="button" onClick={saveAsProject}><Ico name="download" />{isDesktop ? (dir ? "Save to another folder…" : "Save as project…") : "Download design file"}</button>
               {isDesktop && <button type="button" onClick={downloadDoc}><Ico name="file" />Download a copy (.json)</button>}
+              <button type="button" onClick={() => setState({ dialog: "import" })}><Ico name="upload" />Import from Figma or HTML…</button>
               <button type="button" onClick={onExport}><Ico name="share" />Export screens…</button>
+              <button type="button" onClick={() => setState({ dialog: "share" })}><Ico name="users" />Work together live…</button>
             </div>
           )}
         </div>
@@ -65,11 +72,29 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
             </div>
           )}
         </div>
-        <button type="button" title="Add text (T)" onClick={() => quickAdd("text")}><Ico name="edit" />Text</button>
-        <button type="button" title="Add button (B)" onClick={() => quickAdd("button")}><Ico name="plus" />Button</button>
-        <button type="button" title="Add vertical stack" onClick={() => quickAdd("stack")}><Ico name="list" />Stack</button>
-        <button type="button" title="Add row" onClick={() => quickAdd("row")}><Ico name="more" />Row</button>
-        <button type="button" title="Add image" onClick={() => quickAdd("image")}><Ico name="image" />Image</button>
+        <div className="tools" role="toolbar" aria-label="Tools">
+          {TOOLS.map((t, i) =>
+            t === "|" ? (
+              <span key={i} className="sep" />
+            ) : (
+              <button key={t.id} type="button" className={tool === t.id ? "on" : ""} title={`${t.label} (${t.key})`} aria-pressed={tool === t.id} onClick={() => setState({ tool: t.id, editPath: null })}>
+                <Ico name={t.icon} />
+              </button>
+            ),
+          )}
+        </div>
+        <div className="menu-wrap">
+          <button type="button" onClick={(e) => (e.stopPropagation(), setMenu(menu === "add" ? null : "add"))} title="Quick add into the selected spot"><Ico name="plus" />Insert <Ico name="chevron-down" size={12} /></button>
+          {menu === "add" && (
+            <div className="menu">
+              <button type="button" onClick={() => quickAdd("text")}><Ico name="edit" />Text</button>
+              <button type="button" onClick={() => quickAdd("button")}><Ico name="plus" />Button (B)</button>
+              <button type="button" onClick={() => quickAdd("stack")}><Ico name="list" />Vertical stack</button>
+              <button type="button" onClick={() => quickAdd("row")}><Ico name="more" />Row</button>
+              <button type="button" onClick={() => quickAdd("image")}><Ico name="image" />Image</button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="tb-group right">
@@ -80,9 +105,38 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
         <button type="button" className="zoom" title="Fit everything (Shift+1)" onClick={zoomToFit}>{Math.round(zoom * 100)}%</button>
         <button type="button" title="Zoom in" onClick={() => zoomBy(1.25)}><Ico name="plus" /></button>
         <span className="sep" />
+        <button type="button" className={"people-btn" + (collab.role !== "off" ? " live" : "")} title="Work together live" onClick={() => setState({ dialog: "share" })}>
+          {collab.role !== "off" ? (
+            <span className="avs">
+              <span className="av" style={{ background: getUser().color }}>{(getUser().name || "Y")[0].toUpperCase()}</span>
+              {Object.values(peers).slice(0, 4).map((p) => (
+                <span key={p.id} className="av" style={{ background: p.color }} title={p.name}>{p.name[0]?.toUpperCase()}</span>
+              ))}
+            </span>
+          ) : (
+            <Ico name="users" />
+          )}
+          Share
+        </button>
         <button type="button" onClick={onExport}><Ico name="download" />Export</button>
-        <button type="button" className="primary" onClick={play}><Ico name="play" />Play</button>
+        <button type="button" className="primary" onClick={play} title="Play the prototype (F5)"><Ico name="play" />Play</button>
       </div>
     </header>
   );
 }
+
+const TOOLS: ({ id: Tool; icon: string; label: string; key: string } | "|")[] = [
+  { id: "select", icon: "cursor", label: "Move and select", key: "V" },
+  { id: "hand", icon: "hand", label: "Hand — pan the canvas", key: "H or hold Space" },
+  "|",
+  { id: "frame", icon: "frame", label: "Frame — draw a free-position screen or box", key: "F" },
+  { id: "rect", icon: "square", label: "Rectangle", key: "R" },
+  { id: "ellipse", icon: "circle", label: "Ellipse", key: "O" },
+  { id: "line", icon: "line", label: "Line", key: "L" },
+  { id: "arrow", icon: "arrow-right", label: "Arrow", key: "Shift+L" },
+  { id: "pen", icon: "pen", label: "Pen — click for corners, drag for curves", key: "P" },
+  { id: "pencil", icon: "pencil", label: "Pencil — draw freehand", key: "Shift+P" },
+  { id: "text", icon: "type", label: "Text", key: "T" },
+  "|",
+  { id: "comment", icon: "message", label: "Comment", key: "C" },
+];

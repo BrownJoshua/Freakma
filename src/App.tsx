@@ -9,7 +9,11 @@ import { flushSave, getState, redo, select, setState, undo, useStore } from "./m
 import {
   copySelection, deleteSelection, duplicateSelection, initDesktop, paste, quickAdd, reorder, saveAsProject, selectParent, wrapSelection, zoomToFit, patchFn,
 } from "./model/actions";
-import { frameOf } from "./model/doc";
+import { frameOf, parentOf } from "./model/doc";
+import { isPositioned } from "./render/style";
+import { ImportDialog, ShareDialog } from "./ui/Dialogs";
+import { sendSelection } from "./collab/client";
+import type { Tool } from "./model/store";
 
 const typing = (e: KeyboardEvent) => {
   const t = e.target as HTMLElement | null;
@@ -20,6 +24,10 @@ export function App() {
   const play = useStore((s) => s.play);
   const toastMsg = useStore((s) => s.toast);
   const [exporting, setExporting] = useState(false);
+  const dialog = useStore((s) => s.dialog);
+  const selection = useStore((s) => s.selection);
+  const pageId = useStore((s) => s.pageId);
+  useEffect(() => sendSelection(), [selection, pageId]);
 
   useEffect(() => {
     initDesktop();
@@ -49,7 +57,12 @@ export function App() {
         return;
       }
       if (k === "delete" || k === "backspace") return e.preventDefault(), deleteSelection();
-      if (k === "escape") return s.selection.length ? selectParent() : undefined;
+      if (k === "escape") {
+        if (s.editPath) return setState({ editPath: null });
+        if (s.openComment) return setState({ openComment: null });
+        if (s.tool !== "select") return setState({ tool: "select" });
+        return s.selection.length ? selectParent() : undefined;
+      }
       if (k === "enter") {
         const n = s.selection[0] ? s.doc.nodes[s.selection[0]] : null;
         if (n?.type === "text") return e.preventDefault(), setState({ editingText: n.id });
@@ -59,7 +72,11 @@ export function App() {
       if (e.altKey && (k === "arrowup" || k === "arrowleft")) return e.preventDefault(), reorder(-1);
       if (e.altKey && (k === "arrowdown" || k === "arrowright")) return e.preventDefault(), reorder(1);
       if (k.startsWith("arrow")) {
-        const ids = s.selection.filter((id) => s.doc.nodes[id]?.type === "frame");
+        const ids = s.selection.filter((id) => {
+          const n = s.doc.nodes[id];
+          if (!n || n.locked) return false;
+          return n.type === "frame" || isPositioned(n, parentOf(s.doc, id)?.layout);
+        });
         if (!ids.length) return;
         e.preventDefault();
         const d = e.shiftKey ? 10 : 1;
@@ -71,12 +88,16 @@ export function App() {
         });
       }
       if (mod) return;
-      if (k === "t") return quickAdd("text");
-      if (k === "b") return quickAdd("button");
-      if (k === "p") {
+      if (k === "f5") {
+        e.preventDefault();
         const f = s.selection[0] ? frameOf(s.doc, s.selection[0]) : null;
         return setState({ play: f?.id ?? s.doc.pages.find((p) => p.id === s.pageId)?.frames[0] ?? null });
       }
+      if (k === "b" && !e.shiftKey) return quickAdd("button");
+      const tool: Tool | undefined = e.shiftKey
+        ? ({ l: "arrow", p: "pencil" } as Record<string, Tool>)[k]
+        : ({ v: "select", h: "hand", f: "frame", r: "rect", o: "ellipse", l: "line", p: "pen", t: "text", c: "comment" } as Record<string, Tool>)[k];
+      if (tool) return setState({ tool, editPath: null });
       if (e.shiftKey && k === "!") return zoomToFit();
       if (e.shiftKey && e.code === "Digit1") return zoomToFit();
     };
@@ -99,6 +120,8 @@ export function App() {
       </div>
       {play && <Play />}
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
+      {dialog === "import" && <ImportDialog />}
+      {dialog === "share" && <ShareDialog />}
       {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
     </div>
   );

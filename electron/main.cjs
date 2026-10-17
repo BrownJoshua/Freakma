@@ -182,3 +182,101 @@ ipcMain.handle("claude-stop", async () => {
   if (isWin) spawn("taskkill", ["/pid", String(claude.pid), "/t", "/f"], { windowsHide: true });
   else claude.kill("SIGINT");
 });
+
+/* ---------------- live collaboration ---------------- */
+
+const collab = require("./collab.cjs");
+ipcMain.handle("collab-host", async () => collab.start());
+ipcMain.handle("collab-stop", async () => collab.stop());
+app.on("before-quit", () => collab.stop());
+
+/* ---------------- fetching (Figma API, web pages, images) ---------------- */
+
+ipcMain.handle("fetch-url", async (_e, url, headers, binary) => {
+  if (!/^https?:\/\//i.test(url)) throw new Error("Only http(s) addresses can be fetched");
+  const res = await fetch(url, { headers: headers || {}, redirect: "follow" });
+  const type = res.headers.get("content-type") || "";
+  if (binary) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { ok: res.ok, status: res.status, type, base64: buf.toString("base64") };
+  }
+  return { ok: res.ok, status: res.status, type, text: await res.text(), url: res.url };
+});
+
+/** screenshot of a web page, full height up to 8000px, plus its HTML */
+ipcMain.handle("capture-url", async (_e, url, width) => {
+  if (!/^https?:\/\//i.test(url)) throw new Error("Enter a web address starting with http:// or https://");
+  const w = new BrowserWindow({ show: false, width: width || 1440, height: 900, webPreferences: { offscreen: true, sandbox: true, contextIsolation: true } });
+  try {
+    await Promise.race([w.loadURL(url), new Promise((_, rej) => setTimeout(() => rej(new Error("The page took too long to load")), 30000))]);
+    await new Promise((r) => setTimeout(r, 1500));
+    const h = await w.webContents.executeJavaScript("Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)");
+    const height = Math.min(Math.max(600, Number(h) || 900), 8000);
+    w.setContentSize(width || 1440, height);
+    await new Promise((r) => setTimeout(r, 700));
+    const img = await w.webContents.capturePage();
+    const html = await w.webContents.executeJavaScript("document.documentElement.outerHTML");
+    const title = w.webContents.getTitle();
+    const size = img.getSize();
+    return { png: img.toPNG().toString("base64"), html, title, w: size.width, h: size.height };
+  } finally {
+    w.destroy();
+  }
+});
+
+/* ---------------- reference library (shared by all projects) ---------------- */
+
+const refsDir = () => {
+  const d = path.join(app.getPath("userData"), "references");
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+};
+const refsIndex = () => path.join(refsDir(), "index.json");
+const readRefs = () => {
+  try {
+    return JSON.parse(fs.readFileSync(refsIndex(), "utf8"));
+  } catch {
+    return [];
+  }
+};
+const writeRefs = (list) => fs.writeFileSync(refsIndex(), JSON.stringify(list, null, 1));
+const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", svg: "image/svg+xml" };
+
+ipcMain.handle("refs-list", async () => readRefs());
+ipcMain.handle("refs-add", async (_e, meta, data) => {
+  const list = readRefs();
+  const file = `${meta.id}.${meta.ext}`;
+  const m = /^data:[^;]+;base64,(.*)$/.exec(data);
+  fs.writeFileSync(path.join(refsDir(), file), m ? Buffer.from(m[1], "base64") : data);
+  list.unshift(meta);
+  writeRefs(list);
+  return meta;
+});
+ipcMain.handle("refs-update", async (_e, id, patch) => {
+  const list = readRefs().map((r) => (r.id === id ? { ...r, ...patch, id } : r));
+  writeRefs(list);
+});
+ipcMain.handle("refs-delete", async (_e, id) => {
+  const list = readRefs();
+  const r = list.find((x) => x.id === id);
+  if (r) fs.rmSync(path.join(refsDir(), `${r.id}.${r.ext}`), { force: true });
+  writeRefs(list.filter((x) => x.id !== id));
+});
+ipcMain.handle("refs-data", async (_e, id) => {
+  const r = readRefs().find((x) => x.id === id);
+  if (!r) return null;
+  const p = path.join(refsDir(), `${r.id}.${r.ext}`);
+  if (!fs.existsSync(p)) return null;
+  if (MIME[r.ext]) return `data:${MIME[r.ext]};base64,${fs.readFileSync(p).toString("base64")}`;
+  return fs.readFileSync(p, "utf8");
+});
+/** copy a reference into a project so Claude Code can look at it */
+ipcMain.handle("refs-to-project", async (_e, id, dir) => {
+  const r = readRefs().find((x) => x.id === id);
+  if (!r) throw new Error("Reference not found");
+  const out = path.join(dir, "references");
+  fs.mkdirSync(out, { recursive: true });
+  const name = `${(r.name || r.id).replace(/[^a-z0-9-_]+/gi, "-").slice(0, 40)}-${r.id.slice(-4)}.${r.ext}`;
+  fs.copyFileSync(path.join(refsDir(), `${r.id}.${r.ext}`), path.join(out, name));
+  return `references/${name}`;
+});

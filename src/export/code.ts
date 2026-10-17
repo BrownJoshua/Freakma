@@ -1,5 +1,5 @@
 import type { Doc, Layout, Node } from "../model/types";
-import { nodeStyle, cssText } from "../render/style";
+import { nodeStyle, cssText, vectorSvg } from "../render/style";
 import { iconSvg } from "../render/icons";
 import { color, textSpec } from "../model/theme";
 
@@ -31,6 +31,7 @@ export function frameToHTML(doc: Doc, frameId: string): string {
       return wrapLink(`${pad}<${tag} style="${style}">${esc(n.text ?? "").replace(/\n/g, "<br>")}</${tag}>`);
     }
     if (n.type === "icon") return wrapLink(`${pad}<span style="${style}">${iconSvg(n.icon ?? "box", n.w, "currentColor")}</span>`);
+    if (n.type === "vector") return wrapLink(`${pad}<div style="${style}">${vectorSvg(n, t)}</div>`);
     if (n.type === "image") {
       return wrapLink(n.src ? `${pad}<div style="${style}"><img src="${esc(n.src)}" alt="${esc(n.name)}" style="width:100%;height:100%;object-fit:${n.fit ?? "cover"};display:block"></div>` : `${pad}<div style="${style}" aria-label="${esc(n.name)}"></div>`);
     }
@@ -80,6 +81,7 @@ export function frameToReact(doc: Doc, frameId: string): string {
       return `${pad}<${tag} style={${obj(st)}}${click}>{${JSON.stringify(n.text ?? "")}}</${tag}>`;
     }
     if (n.type === "icon") return `${pad}<span style={${obj(st)}}${click} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(iconSvg(n.icon ?? "box", n.w, "currentColor"))} }} />`;
+    if (n.type === "vector") return `${pad}<div style={${obj(st)}}${click} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(vectorSvg(n, t))} }} />`;
     if (n.type === "image") return n.src ? `${pad}<div style={${obj(st)}}${click}><img src={${JSON.stringify(n.src)}} alt={${JSON.stringify(n.name)}} style={{ width: "100%", height: "100%", objectFit: "${n.fit ?? "cover"}", display: "block" }} /></div>` : `${pad}<div style={${obj(st)}} aria-label={${JSON.stringify(n.name)}} />`;
     const kids = n.children.map((c) => walk(c, n.layout, false, depth + 1)).filter(Boolean).join("\n");
     return `${pad}<div style={${obj(st)}}${click}>\n${kids}\n${pad}</div>`;
@@ -106,6 +108,7 @@ export function frameToSpec(doc: Doc, frameId: string): string {
     if (n.type === "text") lines.push(`${pad}- text (${n.textStyle ?? "body"}, ${textSpec(t, n).size}px): "${n.text}"`);
     else if (n.type === "icon") lines.push(`${pad}- icon ${n.icon}`);
     else if (n.type === "image") lines.push(`${pad}- image ${n.name}`);
+    else if (n.type === "vector") lines.push(`${pad}- vector ${n.name}`);
     else {
       lines.push(`${pad}- ${n.name}${n.layout ? ` [${n.layout.mode}, gap ${n.layout.gap}]` : ""}${n.link ? ` → opens "${doc.nodes[n.link]?.name}"` : ""}`);
       n.children.forEach((c) => walk(c, depth + 1));

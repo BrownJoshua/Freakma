@@ -12,7 +12,7 @@
     "app": "node electron/dev.cjs",
     "build": "tsc --noEmit && vite build",
     "start": "vite build && electron .",
-    "dist": "npm run build && electron-builder --win --x64",
+    "dist": "npm run build && electron-builder --win --x64 --publish never",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -32,9 +32,31 @@
   "build": {
     "appId": "com.brownjoshua.freakma",
     "productName": "Freakma",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "electron/**", "package.json"],
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Freakma" }
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Freakma"
+    }
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   }
 }
