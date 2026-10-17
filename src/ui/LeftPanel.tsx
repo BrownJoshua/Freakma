@@ -6,8 +6,8 @@ import { commit, getState, page, select, setState, useStore } from "../model/sto
 import { insertComponent, insertPart, moveTo, focusNode } from "../model/actions";
 import type { Fragment, Theme } from "../model/types";
 import { THEMES, FONT_CHOICES, COLOR_LABELS, cloneTheme } from "../model/theme";
-import { parentOf } from "../model/doc";
-import { setDragSource } from "./dragState";
+import { isDescendant, parentOf } from "../model/doc";
+import { panelPointerDown } from "./dragState";
 import { Ico, Num, Section, Select } from "./controls";
 import { LibraryTab } from "./Library";
 import { CommentsPanel } from "./Comments";
@@ -48,12 +48,22 @@ export const Preview = memo(function Preview({ frag, theme, w }: { frag: Fragmen
   const inner = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ s: number; x: number; y: number } | null>(null);
   useLayoutEffect(() => {
-    const el = inner.current?.firstElementChild as HTMLElement | null;
-    if (!el) return;
-    const W = inner.current!.parentElement!.clientWidth, H = inner.current!.parentElement!.clientHeight;
-    const cw = Math.max(el.offsetWidth, 1), ch = Math.max(el.offsetHeight, 1);
-    const s = Math.min(1, (W - 10) / cw, (H - 10) / ch);
-    setFit({ s, x: (W - cw * s) / 2, y: (H - ch * s) / 2 });
+    const box = inner.current?.parentElement;
+    if (!box) return;
+    const fitNow = () => {
+      const el = inner.current?.firstElementChild as HTMLElement | null;
+      if (!el) return;
+      const W = box.clientWidth, H = box.clientHeight;
+      if (W < 20 || H < 20) return;
+      const cw = Math.max(el.offsetWidth, 1), ch = Math.max(el.offsetHeight, 1);
+      const s = Math.max(0.02, Math.min(1, (W - 10) / cw, (H - 10) / ch));
+      setFit({ s, x: (W - cw * s) / 2, y: (H - ch * s) / 2 });
+    };
+    fitNow();
+    // panels can be laid out (or resized) after the first paint: refit when the tile changes size
+    const ro = new ResizeObserver(fitNow);
+    ro.observe(box);
+    return () => ro.disconnect();
   }, [frag, theme]);
   const hug = frag.nodes[frag.root].wMode !== "fill";
   return (
@@ -75,18 +85,9 @@ function PartTile({ p, theme }: { p: PartDef; theme: Theme }) {
     <button
       type="button"
       className="tile"
-      draggable
       title={`${p.name} — drag onto a screen, or click to add`}
-      onDragStart={(e) => {
-        setDragSource({ kind: "part", id: p.id });
-        e.dataTransfer.setData("text/plain", p.name);
-        e.dataTransfer.effectAllowed = "copy";
-      }}
-      onDragEnd={() => {
-        setDragSource(null);
-        setState({ dropHint: null });
-      }}
-      onClick={() => insertPart(p)}
+      onPointerDown={(e) => panelPointerDown(e, { kind: "part", id: p.id }, p.name, () => insertPart(p))}
+      onClick={(e) => e.detail === 0 && insertPart(p)}
     >
       <Preview frag={frag} theme={theme} w={p.previewW} />
       <span>{p.name}</span>
@@ -98,7 +99,7 @@ function PartsTab() {
   const theme = useStore((s) => s.doc.theme);
   const comps = useStore((s) => s.doc.components);
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<Record<string, boolean>>({ Screens: true, Basics: true, Buttons: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ Screens: true, "Button styles": true, "Box styles": true, "Field styles": true, Tables: true });
   const filtered = q ? PARTS.filter((p) => (p.name + " " + p.cat).toLowerCase().includes(q.toLowerCase())) : PARTS;
   return (
     <>
@@ -106,23 +107,19 @@ function PartsTab() {
         <Ico name="search" size={14} />
         <input placeholder="Search parts (button, table, login…)" value={q} onChange={(e) => setQ(e.target.value)} />
       </label>
-      <p className="hint">Drag a part onto a screen. It snaps into place and resizes with the layout. Click a part to add it to the selected spot.</p>
+      <p className="hint">Drag a part onto a screen: it snaps into place (hold Ctrl to drop it exactly where you let go). Click a part to add it to the selected spot. Empty space on the canvas makes a new screen.</p>
       {comps.length > 0 && !q && (
         <div className="cat">
-          <h4>My components</h4>
+          <h4>My reusable blocks</h4>
           <div className="tiles">
             {comps.map((c) => (
               <button
                 key={c.id}
                 type="button"
                 className="tile"
-                draggable
-                onDragStart={(e) => {
-                  setDragSource({ kind: "component", id: c.id });
-                  e.dataTransfer.setData("text/plain", c.name);
-                }}
-                onDragEnd={() => setDragSource(null)}
-                onClick={() => insertComponent(c.id)}
+                title={`${c.name} — drag onto a screen, or click to add`}
+                onPointerDown={(e) => panelPointerDown(e, { kind: "component", id: c.id }, c.name, () => insertComponent(c.id))}
+                onClick={(e) => e.detail === 0 && insertComponent(c.id)}
               >
                 <Preview frag={c.fragment} theme={theme} w={420} />
                 <span>{c.name}</span>
@@ -162,13 +159,52 @@ function PartsTab() {
 
 const TYPE_ICON: Record<string, string> = { frame: "grid", box: "list", text: "edit", image: "image", icon: "star" };
 
+type LayerDrop = { id: string; where: "before" | "inside" };
+
+/** drag a layer onto another: upper half = before it, lower half of a container = inside it */
+function startLayerDrag(e: React.PointerEvent, dragId: string, setDrop: (d: LayerDrop | null) => void) {
+  if (e.button !== 0) return;
+  const start = { x: e.clientX, y: e.clientY };
+  let moving = false;
+  let cur: LayerDrop | null = null;
+  const mv = (ev: PointerEvent) => {
+    if (!moving && Math.abs(ev.clientY - start.y) < 4) return;
+    moving = true;
+    const row = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest("[data-layer-id]") as HTMLElement | null;
+    const id = row?.dataset.layerId;
+    const doc = getState().doc;
+    if (!row || !id || id === dragId || isDescendant(doc, id, dragId)) cur = null;
+    else {
+      const r = row.getBoundingClientRect();
+      const n = doc.nodes[id];
+      const lower = ev.clientY > r.top + r.height / 2;
+      cur = n.layout && (lower || n.type === "frame") ? { id, where: "inside" } : n.type === "frame" ? null : { id, where: "before" };
+    }
+    setDrop(cur);
+  };
+  const up = () => {
+    removeEventListener("pointermove", mv);
+    removeEventListener("pointerup", up);
+    setDrop(null);
+    if (!moving || !cur) return;
+    const doc = getState().doc;
+    if (cur.where === "inside") moveTo(dragId, cur.id, doc.nodes[cur.id].children.length);
+    else {
+      const p = parentOf(doc, cur.id);
+      if (p) moveTo(dragId, p.id, p.children.indexOf(cur.id));
+    }
+  };
+  addEventListener("pointermove", mv);
+  addEventListener("pointerup", up);
+}
+
 function LayersTab() {
   const doc = useStore((s) => s.doc);
   const pg = useStore((s) => page(s));
   const selection = useStore((s) => s.selection);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
+  const [drop, setDrop] = useState<LayerDrop | null>(null);
 
   const rows: JSX.Element[] = [];
   const walk = (id: string, depth: number) => {
@@ -179,19 +215,10 @@ function LayersTab() {
     rows.push(
       <div
         key={id}
-        className={"layer" + (selection.includes(id) ? " on" : "") + (n.hidden ? " dim" : "")}
+        className={"layer" + (selection.includes(id) ? " on" : "") + (n.hidden ? " dim" : "") + (drop?.id === id ? " drop-" + drop.where : "")}
         style={{ paddingLeft: 6 + depth * 14 }}
-        draggable={n.type !== "frame"}
-        onDragStart={() => setDragId(id)}
-        onDragOver={(e) => dragId && e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (!dragId || dragId === id) return;
-          const p = parentOf(getState().doc, id);
-          if (n.layout && (e.nativeEvent.offsetY > 10 || !p)) moveTo(dragId, id, n.children.length);
-          else if (p) moveTo(dragId, p.id, p.children.indexOf(id));
-          setDragId(null);
-        }}
+        data-layer-id={id}
+        onPointerDown={(e) => n.type !== "frame" && !(e.target as HTMLElement).closest("button,input") && startLayerDrag(e, id, setDrop)}
         onClick={(e) => {
           select(e.shiftKey ? [...getState().selection, id] : [id]);
           if (n.type === "frame") focusNode(id);

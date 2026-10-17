@@ -7,7 +7,11 @@ import { ICON_NAMES } from "../render/icons";
 import {
   alignSelection, deleteSelection, detachComponent, duplicateSelection, makeComponent, makeFree, patch, patchFn, reloadFromDisk, saveAsProject, selectParent, setAbsolute, syncComponent, wrapSelection,
 } from "../model/actions";
-import { isPositioned } from "../render/style";
+import { isPositioned, nodeStyle } from "../render/style";
+import { color } from "../model/theme";
+import { BUTTON_SIZES, applyStyle, stylesFor } from "../parts/styles";
+import type { StylePreset } from "../parts/styles";
+import { tableAddColumn, tableAddRow, tableContext, tableRemoveColumn, tableRemoveRow, tableStripes, toggleLock } from "../model/actions";
 import { ColorPick, Ico, Num, Row, Section, Seg, Select, Text } from "./controls";
 import { bridge } from "../platform";
 import type { ClaudeEvent } from "../platform";
@@ -52,7 +56,10 @@ function Inspector() {
         <button type="button" onClick={() => wrapSelection("column")} title="Wrap in a stack (Ctrl+G)" disabled={isTop}><Ico name="list" />Group</button>
         <button type="button" onClick={selectParent} disabled={!parent} title="Select parent (Esc)"><Ico name="arrow-left" />Parent</button>
         <button type="button" className="danger" onClick={deleteSelection} title="Delete (Del)"><Ico name="trash" />Delete</button>
+        <button type="button" className={n.locked ? "on" : ""} onClick={() => toggleLock(ids)} title="Lock: keep it in place with its structure fixed (text stays editable)"><Ico name="lock" />{n.locked ? "Unlock" : "Lock"}</button>
+        <button type="button" className={n.component ? "on" : ""} onClick={makeComponent} disabled={isTop || !!n.component} title="Save as a reusable block (appears at the top of Parts)"><Ico name="bookmark" />{n.component ? "Reusable" : "Reuse"}</button>
       </div>
+      {n.locked && <p className="hint lockhint"><Ico name="lock" size={12} />Locked. It won't move or resize and nothing can be dropped into it. Double-click its text to edit.</p>}
 
       {isTop && (
         <Section title="Screen">
@@ -71,6 +78,9 @@ function Inspector() {
       <SizeSection n={n} ids={ids} isTop={isTop} />
       {n.layout && <LayoutSection n={n} ids={ids} />}
       {n.type === "vector" && <VectorSection n={n} ids={ids} t={t} />}
+      {(n.type === "box" || n.type === "frame") && <QuickStyles n={n} ids={ids} t={t} />}
+      {n.atomic && /^Button/.test(n.name) && <ButtonSize n={n} ids={ids} />}
+      <TableSection id={n.id} />
       {!n.layout && (n.type === "box" || n.type === "frame") && (
         <Section title="Auto layout">
           <button type="button" className="wide" onClick={() => patch(ids, { layout: defaultLayout("column", 12, 0) })}>Turn on auto layout</button>
@@ -83,22 +93,96 @@ function Inspector() {
       <EffectsSection n={n} ids={ids} t={t} />
 
       {!isTop && (
-        <Section title="Component">
+        <Section title="Reusable block">
           {n.component ? (
             <>
-              <p className="hint">This is a copy of a saved component. Change it, then push the change to every copy.</p>
+              <p className="hint">This is a copy of a reusable block. Its structure is fixed (nothing drops inside it); text stays editable. Change it, then push the change to every copy.</p>
               <button type="button" className="wide" onClick={() => syncComponent(n.id)}>Update all copies from this one</button>
-              <button type="button" className="wide ghost" onClick={() => detachComponent(n.id)}>Detach from component</button>
+              <button type="button" className="wide ghost" onClick={() => detachComponent(n.id)}>Detach (make it a normal, editable group)</button>
             </>
           ) : (
             <>
-              <p className="hint">Save this as a reusable part. It appears at the top of Parts.</p>
-              <button type="button" className="wide" onClick={makeComponent}>Create component</button>
+              <p className="hint">Save this (a table, a set of fields, a card…) as a reusable block. It appears at the top of Parts, ready to drag into any screen.</p>
+              <button type="button" className="wide" onClick={makeComponent}>Make reusable</button>
             </>
           )}
         </Section>
       )}
     </div>
+  );
+}
+
+/** the element a look goes on: a field's look belongs to its input box */
+function styleTarget(doc: { nodes: Record<string, Node> }, id: string) {
+  const n = doc.nodes[id];
+  if (n && /^Field/.test(n.name)) return n.children.find((c) => doc.nodes[c]?.name === "Input") ?? id;
+  return id;
+}
+
+function QuickStyles({ n, ids, t }: { n: Node; ids: string[]; t: Theme }) {
+  const { kind, list } = stylesFor(n);
+  const apply = (p: StylePreset) => commit((d) => ids.forEach((id) => applyStyle(d.nodes, styleTarget(d, id), p)));
+  return (
+    <Section title={kind === "button" ? "Button style" : kind === "field" ? "Field style" : "Quick styles"}>
+      <div className="qs">
+        {list.map((p) => {
+          const fake: Node = { id: "qs", type: "box", name: p.name, children: [], w: 56, h: 30, wMode: "fixed", hMode: "fixed", fill: p.fill, stroke: p.stroke, strokeWidth: p.strokeWidth, radius: p.radius, shadow: p.shadow, shadowCss: p.shadowCss };
+          return (
+            <button key={p.id} type="button" title={p.name} onClick={() => apply(p)}>
+              <span className="qs-sw" style={{ ...nodeStyle(fake, undefined, t), background: color(t, p.fill) ?? "transparent", color: color(t, p.ink) ?? t.colors.text }}>{kind === "button" ? "Btn" : "Aa"}</span>
+              <small>{p.name}</small>
+            </button>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
+function ButtonSize({ n, ids }: { n: Node; ids: string[] }) {
+  const cur = n.h <= 34 ? "S" : n.h >= 50 ? "L" : "M";
+  const set = (k: keyof typeof BUTTON_SIZES) =>
+    commit((d) => {
+      const z = BUTTON_SIZES[k];
+      for (const id of ids) {
+        const b = d.nodes[id];
+        if (!b?.layout) continue;
+        b.h = z.h;
+        b.hMode = "fixed";
+        const icon = !b.children.some((c) => d.nodes[c]?.type === "text");
+        if (icon) b.w = z.h;
+        else b.layout = { ...b.layout, padding: [0, z.pad, 0, z.pad] };
+        for (const c of b.children) if (d.nodes[c]?.type === "text") d.nodes[c].textStyle = z.style;
+      }
+    });
+  return (
+    <Section title="Button size">
+      <Seg value={cur} options={[{ v: "S", label: "Small" }, { v: "M", label: "Medium" }, { v: "L", label: "Large" }]} onChange={set} />
+    </Section>
+  );
+}
+
+function TableSection({ id }: { id: string }) {
+  const doc = useStore((s) => s.doc);
+  const ctx = tableContext(doc, id);
+  if (!ctx) return null;
+  const { table, rows, row, col, cols } = ctx;
+  const striped = !table.children.some((c) => doc.nodes[c]?.name === "Divider") && rows.slice(1).some((r) => doc.nodes[r]?.fill);
+  return (
+    <Section title={`Table · ${rows.length - 1} rows × ${cols} columns`}>
+      <Row label="Rows">
+        <button type="button" className="mini" onClick={() => tableAddRow(table.id, row)} title={row ? "Add a row below this one" : "Add a row at the end"}><Ico name="plus" size={12} />{row ? "Below" : "Add"}</button>
+        <button type="button" className="mini" onClick={() => tableRemoveRow(table.id, row)} title={row ? "Remove this row" : "Remove the last row"}><Ico name="minus" size={12} />{row && rows.indexOf(row) > 0 ? "This" : "Last"}</button>
+      </Row>
+      <Row label="Columns">
+        <button type="button" className="mini" onClick={() => tableAddColumn(table.id, col)} title={col >= 0 ? "Add a column to the right of this one" : "Add a column at the end"}><Ico name="plus" size={12} />{col >= 0 ? "Right" : "Add"}</button>
+        <button type="button" className="mini" onClick={() => tableRemoveColumn(table.id, col)} title={col >= 0 ? "Remove this column" : "Remove the last column"}><Ico name="minus" size={12} />{col >= 0 ? "This" : "Last"}</button>
+      </Row>
+      <Row label="Look">
+        <Seg value={striped ? "s" : "l"} options={[{ v: "l", label: "Lines" }, { v: "s", label: "Stripes" }]} onChange={(v) => tableStripes(table.id, v === "s")} />
+      </Row>
+      {id === table.id && <p className="hint">Click a cell to add rows or columns next to it. Double-click a cell to type.</p>}
+    </Section>
   );
 }
 

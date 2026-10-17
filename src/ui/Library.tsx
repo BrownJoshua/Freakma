@@ -12,7 +12,7 @@ import { focusNode, placeAt } from "../model/actions";
 import { bridge, isDesktop } from "../platform";
 import type { RefMeta } from "../platform";
 import { importHtml } from "../import/apply";
-import { setDragSource } from "./dragState";
+import { panelPointerDown } from "./dragState";
 import { Preview } from "./LeftPanel";
 import { Ico } from "./controls";
 
@@ -586,18 +586,9 @@ function RefTile({ r, onOpen }: { r: RefMeta; onOpen: () => void }) {
     <button
       type="button"
       className="tile ref"
-      draggable={r.kind !== "link"}
       title={`${r.name} — drag onto the canvas, or click for options`}
-      onDragStart={(e) => {
-        setDragSource({ kind: "ref", id: r.id });
-        e.dataTransfer.setData("text/plain", r.name);
-        e.dataTransfer.effectAllowed = "copy";
-      }}
-      onDragEnd={() => {
-        setDragSource(null);
-        setState({ dropHint: null });
-      }}
-      onClick={onOpen}
+      onPointerDown={(e) => (r.kind === "link" ? undefined : panelPointerDown(e, { kind: "ref", id: r.id }, r.name, onOpen))}
+      onClick={(e) => (r.kind === "link" || e.detail === 0) && onOpen()}
     >
       {r.kind === "design" ? (
         <DesignThumb id={r.id} />

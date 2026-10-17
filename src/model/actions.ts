@@ -1,6 +1,6 @@
 import type { Doc, Fragment, Node } from "./types";
 import {
-  DEVICES, duplicate, extract, newDoc, frameOf, insertFragment, isContainer, makeFrame, moveNode, nextFramePosition, normalize, pageOf, parentOf, removeNode, reId, uid, wrap,
+  DEVICES, duplicate, extract, newDoc, frameOf, pathTo, insertFragment, isContainer, makeFrame, moveNode, nextFramePosition, normalize, pageOf, parentOf, removeNode, reId, uid, wrap,
 } from "./doc";
 import { commit, getClipboard, getState, insertionParent, loadDoc, page, select, setClipboard, setDiskSaver, setState, toast, flushSave } from "./store";
 import type { PartDef } from "../parts/library";
@@ -9,12 +9,22 @@ import { PROJECT_GUIDE } from "../claude/projectGuide";
 
 /* ---------------- frames ---------------- */
 
-export function addFrame(device: string) {
+/** a new screen; free = children go exactly where they are dropped instead of stacking */
+export function addFrame(device: string, free = false) {
   let id = "";
   commit((doc) => {
     const p = doc.pages.find((x) => x.id === getState().pageId) ?? doc.pages[0];
     const pos = nextFramePosition(doc, p);
-    id = makeFrame(doc, p, device, pos.x, pos.y).id;
+    const f = makeFrame(doc, p, device, pos.x, pos.y);
+    // a blank screen gets breathing room so dropped blocks don't touch the edges or each other
+    const mobile = f.w < 800;
+    f.layout = { ...f.layout!, gap: mobile ? 16 : 24, padding: mobile ? [24, 16, 24, 16] : [40, 48, 40, 48] };
+    if (free) {
+      f.layout = { ...f.layout!, mode: "free" };
+      f.hMode = "fixed";
+      f.name += " · free";
+    }
+    id = f.id;
   });
   select([id]);
   focusNode(id);
@@ -74,7 +84,7 @@ export function insertPart(part: PartDef, target?: { parentId: string; index: nu
   const frag = part.make();
   let sel = "";
   commit((doc) => {
-    const t = part.screen ? null : target ?? insertionParentIn(doc);
+    const t = part.screen ? null : target ?? (at ? null : insertionParentIn(doc));
     if (t && doc.nodes[t.parentId]) {
       sel = insertFragment(doc, frag, t.parentId, t.index);
       placeAt(doc, sel, t);
@@ -94,11 +104,18 @@ export function placeAt(doc: Doc, id: string, t: { parentId?: string; at?: { x: 
   const n = doc.nodes[id];
   n.x = t.at.x;
   n.y = t.at.y;
+  // in an auto-layout parent an exact spot means floating above the layout
+  if (t.parentId && doc.nodes[t.parentId]?.layout?.mode !== "free") n.abs = true;
+  else delete n.abs;
   if (n.wMode === "fill") {
     n.wMode = "fixed";
     n.w = Math.max(n.w, 360);
   }
   if (n.hMode === "fill") n.hMode = "hug";
+  // keep it inside a fixed-size parent instead of hanging off the edge
+  const p = t.parentId ? doc.nodes[t.parentId] : undefined;
+  if (p && p.wMode === "fixed" && n.wMode === "fixed") n.x = Math.max(0, Math.min(n.x, p.w - n.w));
+  if (p && p.hMode === "fixed" && n.hMode === "fixed") n.y = Math.max(0, Math.min(n.y, p.h - n.h));
 }
 
 function insertionParentIn(doc: Doc) {
@@ -265,7 +282,7 @@ export function makeComponent() {
     doc.nodes[id].component = cid;
     doc.components.push({ id: cid, name: n.name, fragment: extract(doc, id) });
   });
-  toast(`Saved “${n.name}” as a component`);
+  toast(`Saved “${n.name}” as a reusable block. Find it at the top of Parts.`);
 }
 
 /** push this copy's design to the component and every other copy */
@@ -537,4 +554,134 @@ export function renormalizeVector(doc: Doc, id: string) {
   n.h = Math.max(1, Math.round(bh * sy));
   n.vw = bw;
   n.vh = bh;
+}
+
+/* ---------------- tables ---------------- */
+
+/** the table a node is in (or is), plus the row and column the node sits in */
+export function tableContext(doc: Doc, id: string) {
+  const path = pathTo(doc, id);
+  const ti = path.findIndex((p) => doc.nodes[p]?.table);
+  if (ti < 0) return null;
+  const table = doc.nodes[path[ti]];
+  const rows = tableRows(doc, table.id);
+  const row = path[ti + 1] && rows.includes(path[ti + 1]) ? path[ti + 1] : null;
+  const cell = row ? path[ti + 2] ?? null : null;
+  const col = row && cell ? doc.nodes[row].children.indexOf(cell) : -1;
+  const cols = rows.length ? doc.nodes[rows[0]].children.length : 0;
+  return { table, rows, row, col, cols };
+}
+
+const tableRows = (doc: Doc, tableId: string) =>
+  doc.nodes[tableId].children.filter((c) => doc.nodes[c]?.layout?.mode === "row" && doc.nodes[c].name !== "Divider");
+
+const blankCopy = (doc: Doc, id: string, text: (t: Node) => string) => {
+  const f = reId(extract(doc, id));
+  for (const n of Object.values(f.nodes)) if (n.type === "text") n.text = text(n);
+  return f;
+};
+
+export function tableAddRow(tableId: string, afterRow?: string | null) {
+  commit((doc) => {
+    const rows = tableRows(doc, tableId);
+    if (!rows.length) return;
+    const model = afterRow && rows.indexOf(afterRow) > 0 ? afterRow : rows[rows.length - 1];
+    const t = doc.nodes[tableId];
+    const after = afterRow && rows.includes(afterRow) ? afterRow : rows[rows.length - 1];
+    let i = t.children.indexOf(after) + 1;
+    const dividers = t.children.some((c) => doc.nodes[c]?.name === "Divider");
+    if (rows.length === 1) {
+      // only a header so far: make a body row from it
+      const f = blankCopy(doc, model, () => "—");
+      Object.assign(f.nodes[f.root], { name: "Row", fill: undefined });
+      for (const n of Object.values(f.nodes)) if (n.type === "text") Object.assign(n, { textStyle: "bodySm", color: undefined, name: "Cell" });
+      insertFragment(doc, f, tableId, i);
+      return;
+    }
+    if (dividers) {
+      const div = t.children.find((c) => doc.nodes[c]?.name === "Divider")!;
+      insertFragment(doc, reId(extract(doc, div)), tableId, i++);
+    }
+    insertFragment(doc, blankCopy(doc, model, () => "—"), tableId, i);
+  });
+}
+
+export function tableRemoveRow(tableId: string, row?: string | null) {
+  commit((doc) => {
+    const rows = tableRows(doc, tableId);
+    if (rows.length <= 2 && !(row && rows.indexOf(row) > 0)) return toast("A table needs a header and at least one row");
+    const target = row && rows.indexOf(row) > 0 ? row : rows[rows.length - 1];
+    const t = doc.nodes[tableId];
+    const i = t.children.indexOf(target);
+    const prev = t.children[i - 1];
+    removeNode(doc, target);
+    if (prev && doc.nodes[prev]?.name === "Divider") removeNode(doc, prev);
+    else {
+      const next = doc.nodes[tableId].children[i];
+      if (next && doc.nodes[next]?.name === "Divider") removeNode(doc, next);
+    }
+  });
+}
+
+export function tableAddColumn(tableId: string, afterCol = -1) {
+  commit((doc) => {
+    const rows = tableRows(doc, tableId);
+    const count = rows.length ? doc.nodes[rows[0]].children.length : 0;
+    rows.forEach((r, k) => {
+      const kids = doc.nodes[r].children;
+      if (!kids.length) return;
+      const at = afterCol >= 0 && afterCol < kids.length ? afterCol : kids.length - 1;
+      // copy a fixed-width column (the first one usually fills the space)
+      const model = at === 0 && kids.length > 1 ? kids[1] : kids[at];
+      const f = blankCopy(doc, model, () => (k === 0 ? `Column ${count + 1}` : "—"));
+      const root = f.nodes[f.root];
+      if (root.wMode === "fill") Object.assign(root, { wMode: "fixed", w: 120 });
+      if (k === 0) root.name = `Header · Column ${count + 1}`;
+      insertFragment(doc, f, r, at + 1);
+    });
+  });
+}
+
+export function tableRemoveColumn(tableId: string, col = -1) {
+  commit((doc) => {
+    const rows = tableRows(doc, tableId);
+    if (!rows.length || doc.nodes[rows[0]].children.length <= 1) return toast("A table needs at least one column");
+    for (const r of rows) {
+      const kids = doc.nodes[r].children;
+      const target = kids[col >= 0 && col < kids.length ? col : kids.length - 1];
+      if (target) removeNode(doc, target);
+    }
+  });
+}
+
+/** stripes on/off: alternate rows get a soft background, and lines between rows go away */
+export function tableStripes(tableId: string, on: boolean) {
+  commit((doc) => {
+    const t = doc.nodes[tableId];
+    const rows = tableRows(doc, tableId);
+    if (on) for (const c of [...t.children]) if (doc.nodes[c]?.name === "Divider") removeNode(doc, c);
+    rows.slice(1).forEach((r, k) => {
+      if (on && k % 2) doc.nodes[r].fill = "$surfaceAlt";
+      else delete doc.nodes[r].fill;
+    });
+    if (!on) {
+      const body = tableRows(doc, tableId).slice(1);
+      for (const r of body.slice(1)) {
+        const i = doc.nodes[tableId].children.indexOf(r);
+        const div = uid();
+        doc.nodes[div] = { id: div, type: "box", name: "Divider", children: [], w: 200, h: 1, wMode: "fill", hMode: "fixed", fill: "$border", layout: { mode: "row", gap: 0, padding: [0, 0, 0, 0], align: "center", justify: "start", wrap: false, columns: 3 } };
+        doc.nodes[tableId].children.splice(i, 0, div);
+      }
+    }
+  });
+}
+
+export function toggleLock(ids: string[]) {
+  const s = getState();
+  const on = !ids.every((id) => s.doc.nodes[id]?.locked);
+  patchFn(ids, (n) => {
+    if (on) n.locked = true;
+    else delete n.locked;
+  });
+  toast(on ? "Locked: it stays in place and keeps its structure. Text inside is still editable." : "Unlocked");
 }

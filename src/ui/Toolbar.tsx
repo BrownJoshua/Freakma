@@ -66,9 +66,13 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
           <button type="button" className="primary" onClick={(e) => (e.stopPropagation(), setMenu(menu === "screen" ? null : "screen"))}><Ico name="plus" />Add screen</button>
           {menu === "screen" && (
             <div className="menu">
+              <small className="menu-h">Auto layout: things stack and line up for you</small>
               {deviceList.map(([k, d]) => (
                 <button type="button" key={k} onClick={() => addFrame(k)}><Ico name={k === "iphone" || k === "android" ? "phone" : "grid"} />{d.label}</button>
               ))}
+              <small className="menu-h">Free-form: put things exactly where you drop them</small>
+              <button type="button" onClick={() => addFrame("desktop", true)}><Ico name="frame" />Desktop · free-form</button>
+              <button type="button" onClick={() => addFrame("iphone", true)}><Ico name="frame" />iPhone · free-form</button>
             </div>
           )}
         </div>

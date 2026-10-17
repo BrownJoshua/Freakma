@@ -96,10 +96,17 @@ export interface Node {
   link?: string;
 
   hidden?: boolean;
+  /** locked: can't be moved, resized or dropped into, and its contents keep their structure
+   * (text inside stays editable) */
   locked?: boolean;
 
   /** the root of a part dropped from the library (clicks select it as a whole first) */
   part?: boolean;
+  /** a finished element (button, field, badge…): clicks select it whole, and nothing can be
+   * dropped inside it */
+  atomic?: boolean;
+  /** a table: its children are rows (row layout boxes, optionally with dividers between) */
+  table?: boolean;
   /** this subtree is a copy of a saved component */
   component?: string;
   /** frames: which device preset they were made for */

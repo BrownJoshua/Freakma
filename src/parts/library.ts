@@ -1,5 +1,6 @@
 import type { Fragment } from "../model/types";
 import { Builder, make } from "./builder";
+import { BOX_STYLES, BUTTON_STYLES, FIELD_STYLES, applyStyle } from "./styles";
 
 export interface PartDef {
   id: string;
@@ -13,11 +14,77 @@ export interface PartDef {
   make: () => Fragment;
 }
 
-export const CATEGORIES = ["Screens", "Basics", "Buttons", "Inputs", "Web navigation", "Mobile", "Data", "Feedback", "Sections", "ERP"];
+export const CATEGORIES = ["Screens", "Button styles", "Box styles", "Field styles", "Tables", "Basics", "Buttons", "Inputs", "Web navigation", "Mobile", "Data", "Feedback", "Sections", "ERP"];
 
 const P: PartDef[] = [];
 const def = (cat: string, name: string, fn: (b: Builder) => string, previewW = 480, extra: Partial<PartDef> = {}) =>
   P.push({ id: `${cat}/${name}`.toLowerCase().replace(/[^a-z0-9/]+/g, "-"), name, cat, previewW, make: () => make(fn), ...extra });
+
+/* ================= Blank styled blocks =================
+ * Neutral text, ready to restyle: pick a look here, or change it later with Quick styles. */
+
+for (const st of BUTTON_STYLES)
+  def("Button styles", `${st.name} button`, (b) => {
+    const id = b.button("Button", "primary");
+    applyStyle(b.nodes, id, st);
+    return id;
+  }, 240, { keywords: "button cta" });
+def("Button styles", "Button · icon left", (b) => b.button("Button", "primary", { icon: "plus" }), 240);
+def("Button styles", "Button · icon right", (b) => b.button("Next", "primary", { trailing: "arrow-right" }), 240);
+def("Button styles", "Round icon button", (b) => b.button("", "primary", { icon: "plus", radius: "full", w: 44 }), 240);
+def("Button styles", "Small button", (b) => b.button("Button", "primary", { h: 32, pad: [0, 12] }), 240);
+def("Button styles", "Large button", (b) => b.button("Button", "primary", { h: 52, pad: [0, 24] }), 240);
+def("Button styles", "Full-width button", (b) => b.button("Button", "primary", { wMode: "fill", h: 48 }), 360);
+
+const emptyBox = (b: Builder, name: string, h = 160) => b.col({ name, gap: 12, pad: 24, hMode: "fixed", h });
+for (const st of BOX_STYLES)
+  def("Box styles", `${st.name} box`, (b) => {
+    const id = emptyBox(b, `Box · ${st.name}`);
+    applyStyle(b.nodes, id, st);
+    return id;
+  }, 360, { keywords: "container box card panel" });
+def("Box styles", "Row · 2 boxes", (b) => b.row({ name: "Row · 2 columns", gap: 16, align: "start" }, [1, 2].map(() => { const id = emptyBox(b, "Column"); applyStyle(b.nodes, id, BOX_STYLES[3]); b.nodes[id].wMode = "fill"; return id; })), 480);
+def("Box styles", "Row · 3 boxes", (b) => b.row({ name: "Row · 3 columns", gap: 16, align: "start" }, [1, 2, 3].map(() => { const id = emptyBox(b, "Column"); applyStyle(b.nodes, id, BOX_STYLES[3]); b.nodes[id].wMode = "fill"; return id; })), 600);
+def("Box styles", "Sidebar + content", (b) => {
+  const side = emptyBox(b, "Sidebar", 320);
+  applyStyle(b.nodes, side, BOX_STYLES[9]);
+  Object.assign(b.nodes[side], { wMode: "fixed", w: 220 });
+  const main = emptyBox(b, "Content", 320);
+  applyStyle(b.nodes, main, BOX_STYLES[1]);
+  return b.row({ name: "Sidebar layout", gap: 16, align: "start" }, [side, main]);
+}, 640);
+def("Box styles", "Section · full width", (b) => b.col({ name: "Section", gap: 16, pad: [48, 32], hMode: "fixed", h: 240, fill: "$surfaceAlt" }), 640);
+def("Box styles", "Free box (place anything)", (b) => {
+  const id = emptyBox(b, "Free box", 220);
+  b.nodes[id].layout = { ...b.nodes[id].layout!, mode: "free" };
+  applyStyle(b.nodes, id, BOX_STYLES[1]);
+  return id;
+}, 360, { keywords: "absolute free position canvas" });
+
+const blankField = (b: Builder, st: (typeof FIELD_STYLES)[number], label = "Label") => {
+  const id = b.field(label, "Placeholder");
+  const input = b.nodes[id].children.find((c) => b.nodes[c].name === "Input")!;
+  applyStyle(b.nodes, input, st);
+  if (st.ink) b.nodes[input].children.forEach((c) => b.nodes[c].type === "text" && (b.nodes[c].color = "#C9CED6"));
+  return id;
+};
+for (const st of FIELD_STYLES) def("Field styles", `${st.name} field`, (b) => blankField(b, st), 360, { keywords: "input text field form" });
+def("Field styles", "Field without label", (b) => b.field("", "Placeholder"), 360);
+def("Field styles", "Dropdown", (b) => b.field("Label", "Choose…", { trailing: "chevron-down" }), 360);
+def("Field styles", "Date field", (b) => b.field("Label", "DD/MM/YYYY", { icon: "calendar" }), 360);
+def("Field styles", "Text area", (b) => b.field("Label", "Type here…", { multiline: true }), 360);
+def("Field styles", "Search box", (b) => b.field("", "Search", { icon: "search" }), 360);
+def("Field styles", "Checkbox", (b) => b.check("Option", false), 240);
+def("Field styles", "Radio", (b) => b.radio("Option", false), 240);
+def("Field styles", "Toggle", (b) => b.toggle("Setting", true), 300);
+def("Field styles", "Two fields in a row", (b) => b.row({ name: "Field row", gap: 16, align: "start" }, [b.field("Label", "Placeholder"), b.field("Label", "Placeholder")].map((id) => (b.nodes[id].wMode = "fill", id))), 560);
+
+const blankRows = (cols: number, rows: number) => Array.from({ length: rows }, () => Array.from({ length: cols }, () => "—"));
+def("Tables", "Table · 3 columns", (b) => b.table(["Column 1", "Column 2", "Column 3"], blankRows(3, 3)), 640, { keywords: "table grid data" });
+def("Tables", "Table · 5 columns", (b) => b.table(["Column 1", "Column 2", "Column 3", "Column 4", "Column 5"], blankRows(5, 4), { colW: 110 }), 760);
+def("Tables", "Striped table", (b) => b.table(["Name", "Value", "Status"], blankRows(3, 5), { striped: true }), 640);
+def("Tables", "Borderless table", (b) => b.table(["Name", "Value", "Status"], blankRows(3, 3), { stroke: undefined, strokeWidth: undefined, fill: undefined, radius: "none" }), 640);
+def("Tables", "Key–value table", (b) => b.table(["Field", "Value"], [["Label", "—"], ["Label", "—"], ["Label", "—"]], { colW: 220 }), 480);
 
 /* ================= Basics ================= */
 def("Basics", "Heading", (b) => b.text("Page heading", "h1", { wMode: "fill" }));
@@ -177,7 +244,7 @@ def("Data", "Data table", (b) => {
   const head = b.row({ name: "Header row", gap: 12, pad: [10, 16], fill: "$surfaceAlt" }, [cell("Item", "fill", { textStyle: "overline", color: "$textMuted" }), cell("Qty", 80, { textStyle: "overline", color: "$textMuted", textAlign: "right" }), cell("Amount", 120, { textStyle: "overline", color: "$textMuted", textAlign: "right" }), cell("Status", 100, { textStyle: "overline", color: "$textMuted" })]);
   const row = (a: string, q: string, amt: string, st: string, tone: "success" | "warning" | "danger") =>
     b.row({ name: "Row", gap: 12, pad: [12, 16], stroke: "$border", strokeWidth: 0 }, [cell(a, "fill"), cell(q, 80, { textStyle: "mono", textAlign: "right" }), cell(amt, 120, { textStyle: "mono", textAlign: "right" }), b.row({ wMode: "fixed", w: 100 }, [b.badge(st, tone)])]);
-  return b.col({ name: "Data table", gap: 0, fill: "$surface", radius: "md", stroke: "$border", strokeWidth: 1, clip: true }, [head, row("Gear housing GH-220", "200", "3,42,200", "Paid", "success"), b.divider(), row("Machined shaft MS-40", "350", "2,56,060", "Due", "warning"), b.divider(), row("Wooden packing crate", "20", "19,040", "Overdue", "danger")]);
+  return b.col({ name: "Data table", gap: 0, fill: "$surface", radius: "md", stroke: "$border", strokeWidth: 1, clip: true, table: true }, [head, row("Gear housing GH-220", "200", "3,42,200", "Paid", "success"), b.divider(), row("Machined shaft MS-40", "350", "2,56,060", "Due", "warning"), b.divider(), row("Wooden packing crate", "20", "19,040", "Overdue", "danger")]);
 }, 760);
 def("Data", "List with avatars", (b) => {
   const r = (i: string, n: string, s: string, v: string) => b.row({ name: `Row · ${n}`, gap: 12, pad: [12, 0] }, [b.avatar(i, 36), b.col({ gap: 2, wMode: "fill" }, [b.text(n, "label"), b.text(s, "caption", { color: "$textMuted" })]), b.text(v, "mono")]);
@@ -262,7 +329,7 @@ def("ERP", "Invoice line items", (b) => {
   const c = (t: string, w: number | "fill", o: object = {}) => b.text(t, "bodySm", typeof w === "number" ? { wMode: "fixed", w, ...o } : { wMode: "fill", ...o });
   const head = b.row({ name: "Head", gap: 10, pad: [10, 14], fill: "$surfaceAlt" }, [c("Item", "fill", { textStyle: "overline", color: "$textMuted" }), c("HSN", 60, { textStyle: "overline", color: "$textMuted" }), c("Qty", 60, { textStyle: "overline", color: "$textMuted", textAlign: "right" }), c("Rate", 80, { textStyle: "overline", color: "$textMuted", textAlign: "right" }), c("GST", 50, { textStyle: "overline", color: "$textMuted", textAlign: "right" }), c("Amount", 100, { textStyle: "overline", color: "$textMuted", textAlign: "right" })]);
   const r = (a: string, h: string, q: string, rt: string, g: string, amt: string) => b.row({ name: "Line", gap: 10, pad: [12, 14] }, [c(a, "fill"), c(h, 60, { textStyle: "mono" }), c(q, 60, { textStyle: "mono", textAlign: "right" }), c(rt, 80, { textStyle: "mono", textAlign: "right" }), c(g, 50, { textStyle: "mono", textAlign: "right" }), c(amt, 100, { textStyle: "mono", textAlign: "right" })]);
-  return b.col({ name: "Invoice lines", gap: 0, fill: "$surface", radius: "md", stroke: "$border", strokeWidth: 1, clip: true }, [head, r("Gear housing GH-220", "8483", "200", "1,450.00", "18%", "3,42,200.00"), b.divider(), r("Machined shaft MS-40", "8483", "350", "620.00", "18%", "2,56,060.00"), b.divider(), r("Wooden packing crate", "4415", "20", "850.00", "12%", "19,040.00")]);
+  return b.col({ name: "Invoice lines", gap: 0, fill: "$surface", radius: "md", stroke: "$border", strokeWidth: 1, clip: true, table: true }, [head, r("Gear housing GH-220", "8483", "200", "1,450.00", "18%", "3,42,200.00"), b.divider(), r("Machined shaft MS-40", "8483", "350", "620.00", "18%", "2,56,060.00"), b.divider(), r("Wooden packing crate", "4415", "20", "850.00", "12%", "19,040.00")]);
 }, 820);
 def("ERP", "GST totals", (b) => {
   const l = (k: string, v: string, strong = false) => b.row({ justify: "between" }, [b.text(k, strong ? "label" : "bodySm"), b.text(v, "mono", strong ? { fontWeight: 600 } : {})]);

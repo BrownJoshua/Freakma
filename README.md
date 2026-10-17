@@ -11,6 +11,17 @@ is built in, so you can ask for a screen in plain words and watch it appear.
   tables, cards, dialogs, alerts, charts, landing-page sections, ERP blocks, and six full screen
   templates). Everything uses auto layout, so a dropped part takes its place and resizes with
   the screen. A pink line shows exactly where it will land.
+- **Blank styled blocks**: buttons (filled, soft, outline, ghost, pill, gradient, dark…),
+  boxes (card, outlined, soft, elevated, glass, brand, dark, gradient), fields (outlined, filled,
+  underline, rounded…) and tables, all with neutral text, ready to fill in. **Quick styles** in the
+  inspector restyle anything you've already placed in one click; buttons also have S/M/L sizes.
+- **Moving things**: click selects a whole button or field; drag it to move it and it snaps
+  into the layout (pink line). Hold **Ctrl** while dragging to drop it exactly where you let go.
+  *Add screen → free-form* gives a screen where everything stays where you put it.
+- **Tables**: add or remove rows and columns next to the cell you clicked, lines or stripes.
+- **Fixed, reusable blocks**: **Reuse** saves a table, a set of fields or any group as a block
+  at the top of Parts; copies keep their structure (text stays editable) and can all be updated
+  at once. **Lock** pins anything in place so it can't be moved, resized or dropped into.
 - **Change anything**: size (fixed / fill / hug), auto layout (direction, gap, padding,
   alignment, grid columns), colours, borders, corners, shadows, opacity, text style, font, weight,
   line height, alignment, icons, images.

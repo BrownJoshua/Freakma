@@ -66,7 +66,7 @@ export class Builder {
     if (label) kids.push(this.text(label, "button", { color: fg }));
     if (trailing) kids.push(this.icon(trailing, 18, fg));
     return this.row(
-      { name: `Button · ${label || icon}`, gap: 8, pad: [0, label ? 18 : 0], justify: "center", wMode: label ? "hug" : "fixed", w: 44, hMode: "fixed", h: 44, fill: bg, radius: "md", stroke: variant === "outline" ? "$border" : undefined, strokeWidth: variant === "outline" ? 1 : undefined, ...rest },
+      { name: `Button · ${label || icon}`, atomic: true, gap: 8, pad: [0, label ? 18 : 0], justify: "center", wMode: label ? "hug" : "fixed", w: 44, hMode: "fixed", h: 44, fill: bg, radius: "md", stroke: variant === "outline" ? "$border" : undefined, strokeWidth: variant === "outline" ? 1 : undefined, ...rest },
       kids,
     );
   }
@@ -82,23 +82,23 @@ export class Builder {
     const kids = label ? [this.text(label, "label")] : [];
     kids.push(box);
     if (o.help) kids.push(this.text(o.help, "caption", { color: "$textMuted" }));
-    return this.col({ name: `Field · ${label || placeholder}`, gap: 6 }, kids);
+    return this.col({ name: `Field · ${label || placeholder}`, gap: 6, atomic: true }, kids);
   }
 
   check(label: string, on = true) {
     const box = this.row({ name: "Box", wMode: "fixed", w: 20, hMode: "fixed", h: 20, justify: "center", radius: 4, fill: on ? "$primary" : "$surface", stroke: on ? undefined : "$textMuted", strokeWidth: on ? undefined : 2 }, on ? [this.icon("check", 14, "$onPrimary")] : []);
-    return this.row({ name: `Checkbox · ${label}`, gap: 10, wMode: "hug", hMode: "fixed", h: 32 }, [box, this.text(label, "body")]);
+    return this.row({ name: `Checkbox · ${label}`, atomic: true, gap: 10, wMode: "hug", hMode: "fixed", h: 32 }, [box, this.text(label, "body")]);
   }
 
   radio(label: string, on = false) {
     const dot = this.row({ name: "Ring", wMode: "fixed", w: 20, hMode: "fixed", h: 20, justify: "center", radius: "full", stroke: on ? "$primary" : "$textMuted", strokeWidth: 2 }, on ? [this.row({ name: "Dot", wMode: "fixed", w: 10, hMode: "fixed", h: 10, radius: "full", fill: "$primary" })] : []);
-    return this.row({ name: `Radio · ${label}`, gap: 10, wMode: "hug", hMode: "fixed", h: 32 }, [dot, this.text(label, "body")]);
+    return this.row({ name: `Radio · ${label}`, atomic: true, gap: 10, wMode: "hug", hMode: "fixed", h: 32 }, [dot, this.text(label, "body")]);
   }
 
   toggle(label: string, on = true) {
     const knob = this.row({ name: "Knob", wMode: "fixed", w: 22, hMode: "fixed", h: 22, radius: "full", fill: on ? "$onPrimary" : "$textMuted" });
     const track = this.row({ name: "Track", wMode: "fixed", w: 48, hMode: "fixed", h: 28, radius: "full", pad: [0, 3], justify: on ? "end" : "start", fill: on ? "$primary" : "$surfaceAlt", stroke: on ? undefined : "$textMuted", strokeWidth: on ? undefined : 1 }, [knob]);
-    return this.row({ name: `Switch · ${label}`, gap: 12, justify: "between", hMode: "fixed", h: 40 }, [this.text(label, "body"), track]);
+    return this.row({ name: `Switch · ${label}`, atomic: true, gap: 12, justify: "between", hMode: "fixed", h: 40 }, [this.text(label, "body"), track]);
   }
 
   chip(label: string, on = false, icon?: string) {
@@ -106,16 +106,16 @@ export class Builder {
     if (on) kids.push(this.icon("check", 16, "$onPrimarySoft"));
     else if (icon) kids.push(this.icon(icon, 16, "$textMuted"));
     kids.push(this.text(label, "label", { color: on ? "$onPrimarySoft" : "$text" }));
-    return this.row({ name: `Chip · ${label}`, gap: 6, pad: [0, 12], wMode: "hug", hMode: "fixed", h: 34, radius: "sm", fill: on ? "$primarySoft" : "$surface", stroke: on ? undefined : "$border", strokeWidth: on ? undefined : 1 }, kids);
+    return this.row({ name: `Chip · ${label}`, atomic: true, gap: 6, pad: [0, 12], wMode: "hug", hMode: "fixed", h: 34, radius: "sm", fill: on ? "$primarySoft" : "$surface", stroke: on ? undefined : "$border", strokeWidth: on ? undefined : 1 }, kids);
   }
 
   badge(label: string, tone: "success" | "warning" | "danger" | "neutral" | "primary" = "neutral") {
     const map = { success: ["$successSoft", "$success"], warning: ["$warningSoft", "$warning"], danger: ["$dangerSoft", "$danger"], neutral: ["$surfaceAlt", "$textMuted"], primary: ["$primarySoft", "$onPrimarySoft"] }[tone];
-    return this.row({ name: `Badge · ${label}`, pad: [3, 10], wMode: "hug", radius: "full", fill: map[0] }, [this.text(label, "caption", { color: map[1], fontWeight: 600 })]);
+    return this.row({ name: `Badge · ${label}`, atomic: true, pad: [3, 10], wMode: "hug", radius: "full", fill: map[0] }, [this.text(label, "caption", { color: map[1], fontWeight: 600 })]);
   }
 
   avatar(initials: string, size = 40) {
-    return this.row({ name: "Avatar", wMode: "fixed", w: size, hMode: "fixed", h: size, justify: "center", radius: "full", fill: "$primarySoft" }, [this.text(initials, "label", { color: "$onPrimarySoft" })]);
+    return this.row({ name: "Avatar", atomic: true, wMode: "fixed", w: size, hMode: "fixed", h: size, justify: "center", radius: "full", fill: "$primarySoft" }, [this.text(initials, "label", { color: "$onPrimarySoft" })]);
   }
 
   divider() {
@@ -126,6 +126,20 @@ export class Builder {
   bar(pct: number, tone = "$primary", width = 280) {
     const inner = this.row({ name: "Value", wMode: "fixed", w: Math.round((pct / 100) * width), hMode: "fill", radius: "full", fill: tone });
     return this.row({ name: "Progress", wMode: "fixed", w: width, hMode: "fixed", h: 8, radius: "full", fill: "$surfaceAlt", align: "start" }, [inner]);
+  }
+
+  /** a table: header row + rows of text cells; the first column fills, the rest are fixed */
+  table(headers: string[], rows: string[][], o: BoxOpts & { colW?: number; striped?: boolean } = {}) {
+    const { colW = 140, striped, ...rest } = o;
+    const cell = (t: string, i: number, head: boolean) =>
+      this.text(t, head ? "overline" : "bodySm", { name: head ? `Header · ${t || i + 1}` : "Cell", color: head ? "$textMuted" : undefined, ...(i === 0 ? { wMode: "fill" } : { wMode: "fixed", w: colW }) });
+    const head = this.row({ name: "Header row", gap: 12, pad: [10, 16], fill: "$surfaceAlt" }, headers.map((h, i) => cell(h, i, true)));
+    const kids = [head];
+    rows.forEach((r, k) => {
+      if (k > 0 && !striped) kids.push(this.divider());
+      kids.push(this.row({ name: "Row", gap: 12, pad: [12, 16], fill: striped && k % 2 ? "$surfaceAlt" : undefined }, r.map((t, i) => cell(t, i, false))));
+    });
+    return this.col({ name: "Table", gap: 0, fill: "$surface", radius: "md", stroke: "$border", strokeWidth: 1, clip: true, table: true, ...rest }, kids);
   }
 
   card(children: string[], o: BoxOpts = {}) {

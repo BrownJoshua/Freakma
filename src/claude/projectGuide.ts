@@ -1,6 +1,6 @@
 /* Written as CLAUDE.md into every Freakma project folder, so Claude Code knows
  * how to read and edit the design file. Keep it in sync with src/model/types.ts. */
-export const PROJECT_GUIDE = `<!-- freakma-guide v2 -->
+export const PROJECT_GUIDE = `<!-- freakma-guide v3 -->
 # Freakma design project
 
 This folder is a design made in **Freakma**, a desktop design tool. The whole design
@@ -74,8 +74,10 @@ designer sees your change on their canvas immediately. Edit that file to change 
 | \`src\`, \`fit\` | image source (URL or data URL) and \`"cover"\\|"contain"\` |
 | \`icon\` | icon name for icon nodes; \`w\` is the icon size; \`color\` its colour |
 | \`link\` | id of a frame to open when clicked in Play mode (prototype) |
-| \`hidden\`, \`locked\` | layer visibility and lock |
+| \`hidden\`, \`locked\` | layer visibility; locked keeps a block's position, size and structure fixed (its text stays editable) |
 | \`part\` | true on the root of a library part (selected as a whole first) |
+| \`atomic\` | true on finished elements (buttons, fields, badges, chips): selected whole, nothing is dropped inside |
+| \`table\` | true on a table: a column box whose children are row boxes (one cell per child) and optional dividers |
 | \`component\` | id of the component this subtree is a copy of |
 | \`device\` | frames: \`"desktop"\\|"laptop"\\|"tablet"\\|"iphone"\\|"android"\` |
 

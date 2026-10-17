@@ -4,10 +4,10 @@ import { beginGesture, commit, endGesture, getState, live, page, select, setStat
 import type { DropHint, Tool } from "../model/store";
 import { frameOf, isContainer, isDescendant, makeFrame, nextFramePosition, parentOf, pathTo, uid } from "../model/doc";
 import type { Doc, Node, VectorPoint } from "../model/types";
-import { insertComponent, insertPart, moveTo, renormalizeVector } from "../model/actions";
+import { insertComponent, insertPart, moveTo, placeAt, renormalizeVector } from "../model/actions";
 import { partById } from "../parts/library";
 import { isPositioned } from "../render/style";
-import { getDragSource, setDragSource } from "./dragState";
+import { registerCanvasTarget } from "./dragState";
 import { bounds, intersects, shift, simplify, smooth, snap } from "./geometry";
 import type { Pt } from "./geometry";
 import { CommentPins, CommentThread, newComment } from "./Comments";
@@ -17,23 +17,39 @@ import { sendCursor } from "../collab/client";
 export const el = (stage: HTMLElement | null, id: string) => stage?.querySelector(`[data-node-id="${CSS.escape(id)}"]`) as HTMLElement | null;
 const stageEl = () => document.querySelector(".stage") as HTMLElement | null;
 
-/** the smart click: a part is selected as a whole first, a second click goes inside it */
+/** outermost ancestor-or-self that is a finished block (button, field, reusable block) or locked: its insides
+ * are not drop targets and don't move on their own */
+export function sealedRoot(doc: Doc, id: string): string | null {
+  let found: string | null = null;
+  for (const p of pathTo(doc, id)) {
+    const n = doc.nodes[p];
+    if (n && n.type !== "frame" && (n.atomic || n.locked || n.component)) {
+      found = p;
+      break;
+    }
+  }
+  return found;
+}
+
+/** the smart click: parts and finished blocks are selected whole first; clicking again goes
+ * to the next block inside, then to the exact element */
 function pickTarget(deepest: string): string {
   const s = getState();
   const path = pathTo(s.doc, deepest);
+  const isBlock = (id: string) => {
+    const n = s.doc.nodes[id];
+    return !!n && n.type !== "frame" && (!!n.part || !!n.atomic || !!n.locked || !!n.component);
+  };
   const sel = s.selection[0];
   if (sel && path.includes(sel) && sel !== deepest) {
     const i = path.indexOf(sel);
-    return path[i + 1] ?? deepest;
+    const next = path.slice(i + 1).find(isBlock);
+    return next ?? path[i + 1] ?? deepest;
   }
-  for (let i = 1; i < path.length; i++) {
-    const n = s.doc.nodes[path[i]];
-    if (n?.part) return n.id;
-  }
-  return deepest;
+  return path.slice(1).find(isBlock) ?? deepest;
 }
 
-/** the innermost container under a point */
+/** the innermost container under a point that can take a drop */
 export function containerAt(stage: HTMLElement, x: number, y: number, exclude?: string): Node | null {
   const s = getState();
   for (const e of document.elementsFromPoint(x, y)) {
@@ -41,10 +57,13 @@ export function containerAt(stage: HTMLElement, x: number, y: number, exclude?: 
     const nid = (e as HTMLElement).dataset?.nodeId;
     if (!nid) continue;
     if (exclude && (nid === exclude || isDescendant(s.doc, nid, exclude))) continue;
-    let c: Node | null = s.doc.nodes[nid];
-    if (!isContainer(c)) c = parentOf(s.doc, nid);
-    if (!c || !isContainer(c)) continue;
-    if (exclude && isDescendant(s.doc, c.id, exclude)) continue;
+    // never inside a button, a field or a locked block: drop beside it instead
+    const sealed = sealedRoot(s.doc, nid);
+    let c: Node | null = sealed ? parentOf(s.doc, sealed) : s.doc.nodes[nid];
+    if (!sealed && !isContainer(c)) c = parentOf(s.doc, nid);
+    while (c && c.type !== "frame" && sealedRoot(s.doc, c.id)) c = parentOf(s.doc, sealedRoot(s.doc, c.id)!);
+    if (!c || !isContainer(c) || (c.locked && c.type === "frame")) continue;
+    if (exclude && (c.id === exclude || isDescendant(s.doc, c.id, exclude))) continue;
     return c;
   }
   return null;
@@ -58,15 +77,16 @@ export function localPoint(stage: HTMLElement, c: Node, x: number, y: number): P
   return { x: (x - r.left) / z - b, y: (y - r.top) / z - b };
 }
 
-export function computeDrop(stage: HTMLElement, clientX: number, clientY: number, exclude?: string): DropHint | null {
+export function computeDrop(stage: HTMLElement, clientX: number, clientY: number, exclude?: string, free = false): DropHint | null {
   const c = containerAt(stage, clientX, clientY, exclude);
-  return c ? hintFor(stage, c, clientX, clientY, exclude) : null;
+  return c ? hintFor(stage, c, clientX, clientY, exclude, free) : null;
 }
 
-function hintFor(stage: HTMLElement, c: Node, x: number, y: number, exclude?: string): DropHint {
+/** where a drop lands; "free" (Ctrl held) places it at the exact point, outside the auto layout */
+function hintFor(stage: HTMLElement, c: Node, x: number, y: number, exclude?: string, free = false): DropHint {
   const sr = stage.getBoundingClientRect();
   const cr = el(stage, c.id)!.getBoundingClientRect();
-  if (c.layout!.mode === "free") {
+  if (c.layout!.mode === "free" || free) {
     const at = localPoint(stage, c, x, y);
     return { parentId: c.id, index: c.children.length, at: { x: Math.round(at.x), y: Math.round(at.y) }, line: { x: cr.left - sr.left, y: cr.top - sr.top, w: cr.width, h: cr.height } };
   }
@@ -208,7 +228,7 @@ function placeText(stage: HTMLElement, p: Pt) {
 
 /* ---------------- free move with smart guides ---------------- */
 
-function startFreeMove(stage: HTMLElement, ids: string[], e: React.PointerEvent) {
+function startFreeMove(stage: HTMLElement, ids: string[], e: React.PointerEvent, onClick?: () => void) {
   const s = getState();
   const z = s.view.zoom;
   const parent = parentOf(s.doc, ids[0]);
@@ -278,6 +298,7 @@ function startFreeMove(stage: HTMLElement, ids: string[], e: React.PointerEvent)
     removeEventListener("pointerup", up);
     setState({ guides: { x: [], y: [] } });
     if (moving) endGesture();
+    else onClick?.();
   };
   addEventListener("pointermove", mv);
   addEventListener("pointerup", up);
@@ -471,12 +492,17 @@ export function Canvas() {
     if (s.editPath && !(target && target.dataset.nodeId === s.editPath)) setState({ editPath: null });
     if (!target) return startMarquee(st, e, null);
     const deepest = target.dataset.nodeId!;
-    const id = pickTarget(deepest);
-    const n = s.doc.nodes[id];
-    if (e.shiftKey && !(n?.type === "frame")) {
-      select(s.selection.includes(id) ? s.selection.filter((x) => x !== id) : [...s.selection, id]);
+    const drill = pickTarget(deepest);
+    if (e.shiftKey && s.doc.nodes[drill]?.type !== "frame") {
+      select(s.selection.includes(drill) ? s.selection.filter((x) => x !== drill) : [...s.selection, drill]);
       return;
     }
+    // pressing on something already selected drags it; only a plain click goes inside it
+    const path = pathTo(s.doc, deepest);
+    const held = s.selection.find((x) => x !== drill && path.includes(x) && s.doc.nodes[x]?.type !== "frame");
+    const id = held ?? drill;
+    const clickInside = held ? () => select([drill]) : undefined;
+    const n = s.doc.nodes[id];
     if (!n) return;
     if (n.type === "frame") {
       // empty area of a screen: click selects it, drag box-selects inside it
@@ -484,24 +510,28 @@ export function Canvas() {
       return startMarquee(st, e, id);
     }
     if (!s.selection.includes(id)) select([id]);
-    if (n.locked) return;
+    // locked blocks (and everything inside them) stay where they are
+    if (n.locked || (sealedRoot(s.doc, id) && s.doc.nodes[sealedRoot(s.doc, id)!]?.locked)) {
+      if (clickInside) addEventListener("pointerup", () => clickInside(), { once: true });
+      return;
+    }
     const parent = parentOf(s.doc, id);
     if (parent && isPositioned(n, parent.layout)) {
       const sel = getState().selection.filter((x) => {
         const m = s.doc.nodes[x];
         return m && parentOf(s.doc, x)?.id === parent.id && isPositioned(m, parent.layout) && !m.locked;
       });
-      return startFreeMove(st, sel.length ? sel : [id], e);
+      return startFreeMove(st, sel.length ? sel : [id], e, clickInside);
     }
 
-    // drag to reorder inside / between auto layouts
+    // drag to move: snaps into auto layouts (pink line), or with Ctrl lands exactly where dropped
     const start = { x: e.clientX, y: e.clientY };
     let moving = false;
     const mv = (ev: PointerEvent) => {
       if (!moving && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 5) return;
       moving = true;
       document.body.style.cursor = "grabbing";
-      setState({ dropHint: computeDrop(st, ev.clientX, ev.clientY, id), hover: null });
+      setState({ dropHint: computeDrop(st, ev.clientX, ev.clientY, id, ev.ctrlKey || ev.metaKey), hover: null });
     };
     const up = () => {
       removeEventListener("pointermove", mv);
@@ -509,9 +539,25 @@ export function Canvas() {
       document.body.style.cursor = "";
       const hint = getState().dropHint;
       setState({ dropHint: null });
-      if (!moving || !hint) return;
+      if (!moving) return clickInside?.();
+      if (!hint) return;
+      if (hint.at) {
+        // land exactly at the point: keep the visible size so it doesn't jump
+        const z = getState().view.zoom;
+        const r = el(st, id)?.getBoundingClientRect();
+        commit((d) => {
+          const p = parentOf(d, id);
+          if (p) p.children = p.children.filter((c) => c !== id);
+          d.nodes[hint.parentId].children.push(id);
+          const m = d.nodes[id];
+          if (r && m.wMode === "fill") Object.assign(m, { wMode: "fixed", w: Math.round(r.width / z) });
+          if (r && m.hMode === "fill") Object.assign(m, { hMode: "fixed", h: Math.round(r.height / z) });
+          placeAt(d, id, hint);
+        });
+        return;
+      }
       moveTo(id, hint.parentId, hint.index);
-      if (hint.at) commit((d) => Object.assign(d.nodes[id], { x: hint.at!.x, y: hint.at!.y, abs: undefined }));
+      if (n.abs) commit((d) => void delete d.nodes[id].abs);
     };
     addEventListener("pointermove", mv);
     addEventListener("pointerup", up);
@@ -528,33 +574,47 @@ export function Canvas() {
     select([id]);
   };
 
+  // files dragged in from the computer still arrive as HTML5 drops
   const onDragOver = (e: React.DragEvent) => {
-    const src = getDragSource();
-    const files = e.dataTransfer.types.includes("Files");
-    if (!src && !files) return;
+    if (!e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
-    if (src?.kind === "part" && partById(src.id)?.screen) return setState({ dropHint: null });
     setState({ dropHint: computeDrop(stageRef.current!, e.clientX, e.clientY) });
   };
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const hint = getState().dropHint;
     setState({ dropHint: null });
-    const src = getDragSource();
-    setDragSource(null);
     const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-    if (files.length) return dropImages(files, computeDrop(stageRef.current!, e.clientX, e.clientY));
-    if (!src) return;
-    const at = toWorld(stageRef.current!, e.clientX, e.clientY);
-    if (src.kind === "part") {
-      const p = partById(src.id);
-      if (p) insertPart(p, p.screen ? null : hint, at);
-    } else if (src.kind === "component") {
-      if (hint) insertComponent(src.id, hint);
-      else toast("Drop components inside a screen");
-    } else if (src.kind === "ref") placeReference(src.id, hint, at);
+    if (files.length) dropImages(files, computeDrop(stageRef.current!, e.clientX, e.clientY));
   };
+
+  // parts, components and references dragged from the panels (see dragState.ts)
+  useEffect(() => {
+    const stage = () => stageRef.current;
+    const isScreen = (src: { kind: string; id: string }) => src.kind === "part" && !!partById(src.id)?.screen;
+    registerCanvasTarget({
+      over: (x, y) => {
+        const r = stage()?.getBoundingClientRect();
+        return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      },
+      hint: (src, x, y, free) => setState({ dropHint: isScreen(src) ? null : computeDrop(stage()!, x, y, undefined, free) }),
+      clear: () => getState().dropHint && setState({ dropHint: null }),
+      drop: (src, x, y, free) => {
+        const st = stage()!;
+        const hint = isScreen(src) ? null : computeDrop(st, x, y, undefined, free);
+        setState({ dropHint: null });
+        const at = toWorld(st, x, y);
+        if (src.kind === "part") {
+          const p = partById(src.id);
+          if (p) insertPart(p, p.screen ? null : hint, at);
+        } else if (src.kind === "component") {
+          if (hint) insertComponent(src.id, hint);
+          else toast("Drop it inside a screen");
+        } else placeReference(src.id, hint, at);
+      },
+    });
+    return () => void registerCanvasTarget(null);
+  }, []);
 
   return (
     <EditContext.Provider
@@ -903,7 +963,7 @@ export function dropImages(files: File[], hint: DropHint | null) {
           const ratio = img.height / Math.max(1, img.width);
           const w = Math.min(img.width, 480);
           id = uid("img");
-          d.nodes[id] = { id, type: "image", name: f.name.replace(/\.[^.]+$/, ""), children: [], w, h: Math.round(w * ratio), wMode: hint.at ? "fixed" : "fill", hMode: "fixed", src, fit: "cover", radius: "md", ...(hint.at ? { x: hint.at.x, y: hint.at.y } : {}) };
+          d.nodes[id] = { id, type: "image", name: f.name.replace(/\.[^.]+$/, ""), children: [], w, h: Math.round(w * ratio), wMode: hint.at ? "fixed" : "fill", hMode: "fixed", src, fit: "cover", radius: "md", ...(hint.at ? { x: hint.at.x, y: hint.at.y, ...(d.nodes[hint.parentId].layout?.mode === "free" ? {} : { abs: true }) } : {}) };
           d.nodes[hint.parentId].children.splice(hint.index, 0, id);
         });
         select([id]);
