@@ -49,6 +49,8 @@ export interface State {
   openComment: string | null;
   peers: Record<string, Peer>;
   collab: { role: "off" | "host" | "guest"; status: string; address?: string; code?: string };
+  /** draw prototype wires even outside the Prototype tab */
+  showWires: boolean;
   /** which modal is open */
   dialog: "import" | "share" | null;
   /** text waiting to be put into the Claude prompt box */
@@ -91,6 +93,7 @@ let state: State = {
   collab: { role: "off", status: "" },
   dialog: null,
   claudeDraft: null,
+  showWires: false,
   rev: 0,
 };
 

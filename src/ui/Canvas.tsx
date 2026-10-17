@@ -13,6 +13,7 @@ import type { Pt } from "./geometry";
 import { CommentPins, CommentThread, newComment } from "./Comments";
 import { placeReference } from "./Library";
 import { sendCursor } from "../collab/client";
+import { Wires } from "./Wires";
 
 export const el = (stage: HTMLElement | null, id: string) => stage?.querySelector(`[data-node-id="${CSS.escape(id)}"]`) as HTMLElement | null;
 const stageEl = () => document.querySelector(".stage") as HTMLElement | null;
@@ -856,6 +857,7 @@ function Overlay({ stageRef, draft }: { stageRef: React.RefObject<HTMLDivElement
           </div>
         ) : null,
       )}
+      <Wires stage={stageRef.current} />
       <CommentThread />
     </div>
   );

@@ -280,7 +280,7 @@ input[type="color"] { width: 28px; height: 24px; padding: 0; border: 1px solid v
 .lib-add button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-size: 11px; }
 .lib-add button:hover { border-color: var(--accent); }
 .lib-form { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
-.lib-form input, .lib-form textarea, .ref-detail input, .imp input, .imp textarea, .modal input:not([type]), .modal input[type="password"] { width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 0 8px; outline: none; }
+.lib-form input, .lib-form textarea, .ref-detail input, .imp input:not([type=checkbox]):not([type=radio]), .imp textarea, .modal input:not([type]), .modal input[type="password"] { width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 0 8px; outline: none; }
 .lib-form textarea, .imp textarea { height: auto; padding: 8px; font: 11.5px "JetBrains Mono", Consolas, monospace; resize: vertical; }
 .lib-form-b { display: flex; justify-content: flex-end; gap: 6px; }
 .lib-form-b button, .imp-row button, .ref-actions button, .share-opt button, .share-code button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
@@ -313,7 +313,7 @@ input[type="color"] { width: 28px; height: 24px; padding: 0; border: 1px solid v
 .ref-actions .danger { color: var(--danger); background: transparent; }
 
 /* ---------- import + share dialogs ---------- */
-.modal.wide { width: min(720px, 94vw); }
+.modal.modal-wide { width: min(720px, 94vw); }
 .modal { max-height: 92vh; overflow: auto; }
 .seg.big { display: flex; margin-bottom: 14px; }
 .seg.big button { flex: 1; height: 32px; justify-content: center; font-size: 12.5px; }
@@ -363,3 +363,12 @@ body.dragging-part, body.dragging-part * { cursor: grabbing !important; user-sel
 .layer.drop-before { box-shadow: inset 0 2px 0 #ff3d7f; }
 .layer.drop-inside { background: rgba(255, 61, 127, .14); box-shadow: inset 0 0 0 1px #ff3d7f; }
 .layer { touch-action: none; }
+
+/* ---------- prototype wires ---------- */
+.wires { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.wire { fill: none; stroke: #2f80ff; stroke-width: 1.6; opacity: .85; }
+.wire.on { stroke: #ff3d7f; stroke-width: 2.4; opacity: 1; }
+.wire.dragging { stroke-dasharray: 6 4; }
+.wire-handle { position: absolute; width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid #fff; background: #ff3d7f; color: #fff; font: 700 13px/14px var(--ui); pointer-events: auto; cursor: crosshair; box-shadow: 0 2px 6px rgba(0,0,0,.35); z-index: 4; }
+.wire-target { position: absolute; border: 2px solid #ff3d7f; background: rgba(255, 61, 127, .08); border-radius: 2px; }
+.wire.dim { opacity: .14; }

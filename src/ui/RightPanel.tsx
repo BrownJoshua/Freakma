@@ -510,6 +510,7 @@ function EffectsSection({ n, ids, t }: { n: Node; ids: string[]; t: Theme }) {
 
 function PrototypeTab() {
   const doc = useStore((s) => s.doc);
+  const showWires = useStore((s) => s.showWires);
   const selection = useStore((s) => s.selection);
   const n = selection[0] ? doc.nodes[selection[0]] : undefined;
   const frames = doc.pages.flatMap((p) => p.frames).map((id) => doc.nodes[id]).filter(Boolean);
@@ -526,6 +527,10 @@ function PrototypeTab() {
         ) : (
           <p className="hint">Select a button or any element inside a screen, then choose which screen it opens.</p>
         )}
+      </Section>
+      <Section title="Wires">
+        <p className="hint">While this tab is open, arrows show where each link goes. To link something, select it and drag its <b>+</b> handle onto a screen.</p>
+        <label className="opt"><input type="checkbox" checked={showWires} onChange={() => setState({ showWires: !showWires })} />Always show wires</label>
       </Section>
       <Section title="Play">
         <button type="button" className="wide primary" disabled={!start} onClick={() => setState({ play: start ?? null })}><Ico name="play" />Play from {start ? doc.nodes[start].name : "first screen"}</button>

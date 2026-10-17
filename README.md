@@ -44,8 +44,13 @@ is built in, so you can ask for a screen in plain words and watch it appear.
 - **Import from Figma**: paste a Figma file link (or a link to one frame) and your personal access
   token. Auto-layout frames stay auto layout; text, colours, gradients, corners, shadows, images and
   vector shapes come across. A saved Figma API `.json` also works offline.
-- **Import HTML**: paste HTML, open an `.html` file, or give a website address (desktop app).
-  Flex and grid become auto layout, positioned elements become free layers, text keeps its fonts.
+- **Import HTML prototypes, wired**: pick one `.html` file, several pages, or a whole folder
+  (its CSS and images come along). Hidden screens, tabs and popups each become a screen, and
+  buttons and links (`href="#id"`, `href="page.html"`, `data-target`, `onclick="show('id')"`) become
+  prototype links, drawn as wires. Popups sit on the screen that opens them, and their close or
+  cancel buttons lead back. Flex and grid become auto layout; scripts never run.
+- **Wires**: on the Prototype tab, arrows show where every link goes. Select anything and drag its
+  **+** handle onto a screen to link it, then press Play to click through.
 - **Reference library**: collect ideas in the Library tab. Drop or paste screenshots, capture whole
   websites (screenshot + HTML), save any selection, keep HTML snippets and links, sort them into
   boards with tags. Then drag a reference onto the canvas, **trace over it** (locked, see-through),

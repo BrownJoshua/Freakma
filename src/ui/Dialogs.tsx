@@ -4,7 +4,8 @@ import { getUser, saveUser } from "../model/user";
 import { bridge, isDesktop } from "../platform";
 import { convertFigma, fetchFigma, parseFigmaUrl } from "../import/figma";
 import type { FigmaFile } from "../import/figma";
-import { addImportedPages, importHtml } from "../import/apply";
+import { addImportedPages, importHtml, importHtmlScreens, readHtmlFolder } from "../import/apply";
+import type { HtmlFile } from "../import/htmlScreens";
 import { host, join, leave } from "../collab/client";
 import { Ico } from "./controls";
 
@@ -14,7 +15,7 @@ const TOKEN_KEY = "freakma:figma-token";
 function Modal({ title, children, wide }: { title: string; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="modal-bg" onClick={close}>
-      <div className={"modal" + (wide ? " wide" : "")} role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+      <div className={"modal" + (wide ? " modal-wide" : "")} role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>{title}</h2>
           <button type="button" className="x" onClick={close} aria-label="Close"><Ico name="close" /></button>
@@ -119,22 +120,33 @@ function FigmaImport() {
 }
 
 function HtmlImport() {
-  const [src, setSrc] = useState<"paste" | "file" | "url">("paste");
+  const [src, setSrc] = useState<"paste" | "file" | "folder" | "url">("file");
   const [html, setHtml] = useState("");
   const [url, setUrl] = useState("https://");
-  const [width, setWidth] = useState(1440);
+  const [width, setWidth] = useState(390);
+  const [split, setSplit] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
-  const [fileName, setFileName] = useState("");
+  const [picked, setPicked] = useState<File[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
 
   const go = async () => {
     setBusy(true);
     setStatus("Rendering the page…");
     try {
-      let text = html, base: string | undefined, name = fileName.replace(/\.html?$/i, "");
-      if (src === "url") {
+      let files: HtmlFile[] = [];
+      if (src === "paste") {
+        if (!html.trim()) throw new Error("Paste some HTML first");
+        files = [{ name: "pasted.html", html }];
+      } else if (src === "file" || src === "folder") {
+        if (!picked.length) throw new Error(src === "folder" ? "Choose the folder first" : "Choose the .html file(s) first");
+        setStatus("Reading files, styles and images…");
+        files = await readHtmlFolder(picked);
+        if (!files.length) throw new Error("No .html files in what you picked");
+      } else {
         if (!/^https?:\/\//.test(url)) throw new Error("Enter a web address starting with https://");
+        let text = "";
         if (bridge) {
           // a real browser render picks up the page's JavaScript-built content too
           const r = await bridge.captureUrl(url, width).catch(() => null);
@@ -149,12 +161,15 @@ function HtmlImport() {
           if (!f) throw new Error("The browser blocked fetching that site. Use the desktop app, or save the page and import the file.");
           text = await f.text();
         }
-        base = url;
-        name = new URL(url).hostname;
+        files = [{ name: new URL(url).hostname + ".html", html: text, baseUrl: url }];
       }
-      if (!text.trim()) throw new Error("There is no HTML to import yet");
-      const r = await importHtml(text, { width, baseUrl: base, name: name || undefined });
-      toast(`Imported ${r.count} layers. Everything is editable.`);
+      if (split) {
+        const r = await importHtmlScreens(files, { width, pageName: files.length > 1 ? "Imported prototype" : files[0].name.replace(/\.html?$/i, ""), onStatus: setStatus });
+        toast(`Imported ${r.screens} screens${r.popups ? ` (${r.popups} popups)` : ""} with ${r.links} wired links${r.unresolved ? ` · ${r.unresolved} links pointed nowhere` : ""}`);
+      } else {
+        for (const f of files) await importHtml(f.html, { width, baseUrl: f.baseUrl, name: f.name.replace(/\.html?$/i, "") });
+        toast(files.length > 1 ? `Imported ${files.length} pages` : "Imported. Everything is editable.");
+      }
       close();
     } catch (e) {
       setStatus((e as Error).message);
@@ -166,27 +181,27 @@ function HtmlImport() {
   return (
     <div className="imp">
       <div className="seg">
+        <button type="button" className={src === "file" ? "on" : ""} onClick={() => setSrc("file")}>HTML file(s)</button>
+        <button type="button" className={src === "folder" ? "on" : ""} onClick={() => setSrc("folder")}>Whole folder</button>
         <button type="button" className={src === "paste" ? "on" : ""} onClick={() => setSrc("paste")}>Paste HTML</button>
-        <button type="button" className={src === "file" ? "on" : ""} onClick={() => setSrc("file")}>HTML file</button>
         <button type="button" className={src === "url" ? "on" : ""} onClick={() => setSrc("url")}>Website</button>
       </div>
       {src === "paste" && <textarea rows={9} value={html} onChange={(e) => setHtml(e.target.value)} placeholder="<!doctype html>…  (styles in <style> tags are used)" autoFocus />}
-      {src === "file" && (
+      {(src === "file" || src === "folder") && (
         <div className="imp-row">
-          <button type="button" onClick={() => fileRef.current?.click()}><Ico name="upload" size={14} />Choose an .html file</button>
-          <span className="hint">{fileName || "Inline <style> and styles from absolute links are used."}</span>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".html,.htm,text/html"
-            hidden
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (!f) return;
-              setFileName(f.name);
-              setHtml(await f.text());
-            }}
-          />
+          <button type="button" onClick={() => (src === "folder" ? folderRef : fileRef).current?.click()}>
+            <Ico name={src === "folder" ? "folder" : "upload"} size={14} />
+            {src === "folder" ? "Choose a folder" : "Choose .html files"}
+          </button>
+          <span className="hint">
+            {picked.length
+              ? `${picked.filter((f) => /\.html?$/i.test(f.name)).length} HTML file(s)${picked.length > 1 ? `, ${picked.filter((f) => !/\.html?$/i.test(f.name)).length} other files (CSS, images)` : ""}`
+              : src === "folder"
+                ? "Pick the folder that holds your pages, CSS and images. Links between the pages become wires."
+                : "Pick one file, or several pages that link to each other (with their .css files)."}
+          </span>
+          <input ref={fileRef} type="file" accept=".html,.htm,.css,image/*,text/html" multiple hidden onChange={(e) => setPicked(Array.from(e.target.files ?? []))} />
+          <input ref={folderRef} type="file" hidden multiple {...({ webkitdirectory: "", directory: "" } as object)} onChange={(e) => setPicked(Array.from(e.target.files ?? []))} />
         </div>
       )}
       {src === "url" && (
@@ -203,11 +218,19 @@ function HtmlImport() {
           <button type="button" className={width === 390 ? "on" : ""} onClick={() => setWidth(390)}>Mobile 390</button>
         </div>
       </div>
+      <label className="opt">
+        <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />
+        Split into screens and popups, and wire up the buttons and links between them
+      </label>
       <div className="imp-row end">
-        <button type="button" className="primary" disabled={busy} onClick={go}>{busy ? "Importing…" : "Import as an editable screen"}</button>
+        <button type="button" className="primary" disabled={busy} onClick={go}>{busy ? "Importing…" : split ? "Import as wired screens" : "Import as an editable screen"}</button>
       </div>
       {status && <p className="imp-status">{status}</p>}
-      <p className="hint">Flex and grid become auto layout, positioned elements become free layers, and text keeps its fonts and colours. Scripts never run.</p>
+      <p className="hint">
+        Hidden screens, tabs and popups in the page each become a screen; <code>href="#id"</code>, <code>href="page.html"</code>,
+        <code>data-target</code> and <code>onclick="show('id')"</code> become prototype links, and close buttons in popups lead back.
+        Scripts never run, so content that only JavaScript creates won't appear. Flex and grid become auto layout.
+      </p>
     </div>
   );
 }

@@ -37,10 +37,20 @@ function waitFor(iframe: HTMLIFrameElement, ms: number) {
   });
 }
 
-export async function htmlToFragment(html: string, opts: HtmlImportOptions): Promise<{ frag: Fragment; height: number; title: string }> {
+export interface Mounted {
+  iframe: HTMLIFrameElement;
+  doc: Document;
+  win: Window;
+  /** the viewport height the page is laid out in (what 100vh means) */
+  viewportH: number;
+}
+
+/** render HTML in a hidden, script-free iframe at a device size */
+export async function mountHtml(html: string, opts: HtmlImportOptions & { viewportH?: number }): Promise<Mounted> {
+  const viewportH = opts.viewportH ?? (opts.width < 800 ? 844 : 900);
   const iframe = document.createElement("iframe");
   iframe.setAttribute("sandbox", "allow-same-origin");
-  iframe.style.cssText = `position:fixed;left:-30000px;top:0;width:${opts.width}px;height:1000px;border:0;opacity:0;pointer-events:none`;
+  iframe.style.cssText = `position:fixed;left:-30000px;top:0;width:${opts.width}px;height:${viewportH}px;border:0;opacity:0;pointer-events:none`;
   const base = opts.baseUrl ? `<base href="${opts.baseUrl.replace(/"/g, "&quot;")}">` : "";
   let src = html;
   if (base) src = /<head[^>]*>/i.test(src) ? src.replace(/<head[^>]*>/i, (m) => m + base) : base + src;
@@ -51,19 +61,36 @@ export async function htmlToFragment(html: string, opts: HtmlImportOptions): Pro
     const d = iframe.contentDocument!;
     await Promise.race([d.fonts?.ready, new Promise((r) => setTimeout(r, 1500))]);
     await new Promise((r) => setTimeout(r, 400));
-    const fullH = Math.max(d.documentElement.scrollHeight, d.body?.scrollHeight ?? 0);
-    iframe.style.height = Math.min(fullH, 20000) + "px";
-    await new Promise((r) => setTimeout(r, 150));
-    const conv = new Converter(iframe.contentWindow!);
-    const root = conv.root(d.body ?? d.documentElement, opts.name ?? (d.title || "Imported page"));
-    return { frag: { root, nodes: conv.nodes }, height: Math.round(d.body?.getBoundingClientRect().height ?? fullH), title: d.title };
-  } finally {
+    return { iframe, doc: d, win: iframe.contentWindow!, viewportH };
+  } catch (e) {
     iframe.remove();
+    throw e;
+  }
+}
+
+/** turn what the mounted page shows right now into a fragment; byEl maps elements to their nodes */
+export function convertMounted(m: Mounted, name: string) {
+  const d = m.doc;
+  const conv = new Converter(m.win);
+  const root = conv.root(d.body ?? d.documentElement, name);
+  const contentH = Math.max(d.body?.scrollHeight ?? 0, d.documentElement.scrollHeight, Math.round(d.body?.getBoundingClientRect().height ?? 0));
+  return { frag: { root, nodes: conv.nodes } as Fragment, height: Math.round(contentH), title: d.title, byEl: conv.byEl };
+}
+
+export async function htmlToFragment(html: string, opts: HtmlImportOptions): Promise<{ frag: Fragment; height: number; title: string }> {
+  const m = await mountHtml(html, opts);
+  try {
+    const r = convertMounted(m, opts.name ?? (m.doc.title || "Imported page"));
+    return { frag: r.frag, height: r.height, title: r.title };
+  } finally {
+    m.iframe.remove();
   }
 }
 
 class Converter {
   nodes: Record<string, Node> = {};
+  /** which node each converted element became (used to wire up prototype links) */
+  byEl = new Map<Element, string>();
   count = 0;
   constructor(private win: Window) {}
 
@@ -216,12 +243,14 @@ class Converter {
           const gcs = this.cs(g);
           if (!this.visible(g, gcs)) continue;
           const id = this.element(g, gcs, L, innerW);
+          if (id) this.byEl.set(g, id);
           if (id) items.push({ id, r: g.getBoundingClientRect(), positioned: /absolute|fixed/.test(gcs.position) });
         }
         continue;
       }
       if (!this.visible(c, cs)) continue;
       const id = this.element(c, cs, L, innerW);
+      if (id) this.byEl.set(c, id);
       if (id) items.push({ id, r: c.getBoundingClientRect(), positioned: /absolute|fixed/.test(cs.position) });
     }
 
