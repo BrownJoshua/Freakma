@@ -1,0 +1,40 @@
+{
+  "name": "freakma",
+  "productName": "Freakma",
+  "version": "0.1.0",
+  "description": "Desktop design tool: drag-and-drop web and mobile screens, with Claude Code built in.",
+  "main": "electron/main.cjs",
+  "private": true,
+  "license": "MIT",
+  "author": "Brown Joshua",
+  "scripts": {
+    "dev": "vite",
+    "app": "node electron/dev.cjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "vite build && electron .",
+    "dist": "npm run build && electron-builder --win --x64",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^31.7.0",
+    "electron-builder": "^24.13.3",
+    "html-to-image": "^1.11.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  },
+  "build": {
+    "appId": "com.brownjoshua.freakma",
+    "productName": "Freakma",
+    "directories": { "output": "release" },
+    "files": ["dist/**", "electron/**", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Freakma" }
+  }
+}
