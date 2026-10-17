@@ -6,7 +6,9 @@ import { focusNode, zoomToFit } from "../model/actions";
 import { htmlToFragment } from "./html";
 import type { ImportedPage } from "./figma";
 import { htmlToScreens } from "./htmlScreens";
-import type { HtmlFile } from "./htmlScreens";
+import type { HtmlFile, ImportedScreen, ScreensResult } from "./htmlScreens";
+import { convertMounted, mountHtml } from "./html";
+import { bridge } from "../platform";
 
 const DEVICE_BY_WIDTH: Record<number, string> = { 1440: "desktop", 1280: "laptop", 834: "tablet", 390: "iphone", 412: "android" };
 
@@ -72,12 +74,67 @@ export const currentPage = () => page();
 /** a whole HTML prototype (one file or a folder) → wired screens on a new page */
 export async function importHtmlScreens(files: HtmlFile[], opts: { width: number; pageName?: string; onStatus?: (s: string) => void }) {
   const res = await htmlToScreens(files, opts);
+  return placeScreens(res, opts);
+}
+
+/** run the prototype's JavaScript (desktop): click through it and keep every screen it reaches */
+export async function importCrawled(files: HtmlFile[], opts: { width: number; pageName?: string; onStatus?: (s: string) => void }) {
+  if (!bridge) throw new Error("Running a prototype's scripts needs the desktop app");
+  opts.onStatus?.("Opening the prototype and clicking through it…");
+  const off = bridge.onCrawlProgress((t) => opts.onStatus?.(t));
+  let crawl;
+  try {
+    crawl = await bridge.crawlHtml(files.map((f) => ({ name: f.name, html: f.html })), { width: opts.width });
+  } finally {
+    off();
+  }
+  const screens: ImportedScreen[] = [];
+  const links: ScreensResult["links"] = [];
+  const nodeOfClick: Record<string, string>[] = [];
+  for (const [i, st] of crawl.states.entries()) {
+    opts.onStatus?.(`Building screen ${i + 1} of ${crawl.states.length}…`);
+    const m = await mountHtml(st.html, { width: opts.width, baseUrl: crawl.base + st.file });
+    try {
+      const r = convertMounted(m, st.name);
+      const map: Record<string, string> = {};
+      r.byEl.forEach((node, el) => {
+        const c = el.getAttribute("data-fk-c");
+        if (c !== null && !(c in map)) map[c] = node;
+      });
+      // a clickable that became text inside a bigger node: use its closest converted ancestor
+      for (const el of Array.from(m.doc.querySelectorAll("[data-fk-c]"))) {
+        const c = el.getAttribute("data-fk-c")!;
+        if (map[c]) continue;
+        for (let p: Element | null = el.parentElement; p; p = p.parentElement) if (r.byEl.has(p)) { map[c] = r.byEl.get(p)!; break; }
+        if (!map[c]) for (const d of Array.from(el.querySelectorAll("*"))) if (r.byEl.has(d)) { map[c] = r.byEl.get(d)!; break; }
+      }
+      nodeOfClick.push(map);
+      screens.push({ key: st.key, name: st.name, kind: st.overlay ? "popup" : "screen", frag: r.frag, height: r.height });
+    } finally {
+      m.iframe.remove();
+    }
+  }
+  for (const l of crawl.links) {
+    const node = nodeOfClick[l.from]?.[String(l.click)];
+    if (node) links.push({ screen: crawl.states[l.from].key, node, target: crawl.states[l.to].key });
+  }
+  // de-duplicate names (Screen, Screen 2…)
+  const seen: Record<string, number> = {};
+  for (const s of screens) {
+    const n = (seen[s.name] = (seen[s.name] ?? 0) + 1);
+    if (n > 1) s.name = `${s.name} ${n}`;
+  }
+  const r = placeScreens({ screens, links, unresolved: 0 }, opts);
+  return { ...r, timedOut: crawl.timedOut };
+}
+
+function placeScreens(res: ScreensResult, opts: { width: number; pageName?: string }) {
   const viewportH = opts.width < 800 ? 844 : 900;
   // mark links with the target's key; they become frame ids once the frames exist
   for (const l of res.links) {
     const s = res.screens.find((x) => x.key === l.screen);
     const n = s?.frag.nodes[l.node];
-    if (n) n.link = "@" + l.target;
+    if (n && !n.link) n.link = "@" + l.target;
   }
   const frameOfKey: Record<string, string> = {};
   let pageId = "";
@@ -85,15 +142,16 @@ export async function importHtmlScreens(files: HtmlFile[], opts: { width: number
     const p: Page = { id: uid("p"), name: opts.pageName || "Imported prototype", frames: [] };
     doc.pages.push(p);
     pageId = p.id;
-    const gapX = 120, gapY = 200;
-    let x = 0, y = 0, rowH = 0, lastFile = "";
+    const gapX = 120, gapY = 200, perRow = 6;
+    let x = 0, y = 0, rowH = 0, lastFile = "", col = 0;
     for (const s of res.screens) {
-      const file = s.key.split("#")[0];
-      if (lastFile && file !== lastFile) {
-        // each file starts a new row
+      const file = s.key.includes("#") ? s.key.split("#")[0] : "";
+      if ((lastFile && file !== lastFile) || col === perRow) {
+        // each file starts a new row; long flows wrap
         x = 0;
         y += rowH + gapY;
         rowH = 0;
+        col = 0;
       }
       lastFile = file;
       const id = placeFrame(doc, p, s.frag, x, y);
@@ -104,6 +162,7 @@ export async function importHtmlScreens(files: HtmlFile[], opts: { width: number
       if (dev) r.device = dev;
       frameOfKey[s.key] = id;
       x += opts.width + gapX;
+      col++;
       rowH = Math.max(rowH, r.h);
     }
     for (const n of Object.values(doc.nodes)) {
@@ -184,6 +243,14 @@ export async function readHtmlFolder(list: File[]): Promise<HtmlFile[]> {
       const f = byPath.get(cp);
       if (!f) continue;
       html = html.replace(l[0], `<style>${await inlineUrls(await readText(f), cp)}</style>`);
+    }
+    // <script src="js/app.js"> → inline, so the prototype can run from anywhere
+    for (const sc of [...html.matchAll(/<script\b([^>]*)\bsrc=["']([^"']+)["']([^>]*)>\s*<\/script>/gi)]) {
+      if (!local(sc[2])) continue;
+      const f = byPath.get(resolvePath(p, sc[2].split(/[?#]/)[0]));
+      if (!f) continue;
+      const code = (await readText(f)).replace(/<\/script/gi, "<\\/script");
+      html = html.replace(sc[0], `<script${sc[1]}${sc[3]}>${code}</script>`);
     }
     // src="img/logo.png", poster, and url() in inline styles
     const attrs = [...html.matchAll(/\b(src|poster|href)=["']([^"']+)["']/gi)].filter((m) => m[1].toLowerCase() !== "href" || /\.(png|jpe?g|gif|webp|svg|ico)$/i.test(m[2]));

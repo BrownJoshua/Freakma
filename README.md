@@ -48,7 +48,12 @@ is built in, so you can ask for a screen in plain words and watch it appear.
   (its CSS and images come along). Hidden screens, tabs and popups each become a screen, and
   buttons and links (`href="#id"`, `href="page.html"`, `data-target`, `onclick="show('id')"`) become
   prototype links, drawn as wires. Popups sit on the screen that opens them, and their close or
-  cancel buttons lead back. Flex and grid become auto layout; scripts never run.
+  cancel buttons lead back. Flex and grid become auto layout.
+  For prototypes built with JavaScript (screens drawn by code, buttons wired in scripts) the
+  desktop app can **run the prototype and click through it**: it opens the page in a hidden,
+  sandboxed window, presses every button and link like a person would, and keeps each screen and
+  popup it reaches, with the clicks wired up. Same-layout screens showing different records are
+  kept once.
 - **Live preview, side by side**: press **Preview** in the toolbar to see the screen you're
   working on beside the canvas, in a phone or browser frame, updating as you edit. It follows the
   screen you select; links are clickable so you can try the flow, and clicking anything else

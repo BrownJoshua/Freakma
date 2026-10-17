@@ -32,4 +32,6 @@ contextBridge.exposeInMainWorld("freakma", {
   refsData: (id) => ipcRenderer.invoke("refs-data", id),
   refsToProject: (id, dir) => ipcRenderer.invoke("refs-to-project", id, dir),
   openPreview: () => ipcRenderer.invoke("open-preview"),
+  crawlHtml: (files, opts) => ipcRenderer.invoke("crawl-html", files, opts),
+  onCrawlProgress: on("crawl-progress"),
 });

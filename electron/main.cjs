@@ -411,3 +411,17 @@ ipcMain.handle("open-preview", async () => {
   });
   previewWin.on("closed", () => (previewWin = null));
 });
+
+/* ---------------- crawling a JavaScript prototype into screens ---------------- */
+
+const { crawl } = require("./crawl.cjs");
+let crawling = false;
+ipcMain.handle("crawl-html", async (_e, files, opts) => {
+  if (crawling) throw new Error("Already importing a prototype");
+  crawling = true;
+  try {
+    return await crawl(files, opts || {}, (text) => win && win.webContents.send("crawl-progress", text));
+  } finally {
+    crawling = false;
+  }
+});

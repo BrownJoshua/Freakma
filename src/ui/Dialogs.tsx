@@ -4,7 +4,7 @@ import { getUser, saveUser } from "../model/user";
 import { bridge, isDesktop } from "../platform";
 import { convertFigma, fetchFigma, parseFigmaUrl } from "../import/figma";
 import type { FigmaFile } from "../import/figma";
-import { addImportedPages, importHtml, importHtmlScreens, readHtmlFolder } from "../import/apply";
+import { addImportedPages, importCrawled, importHtml, importHtmlScreens, readHtmlFolder } from "../import/apply";
 import type { HtmlFile } from "../import/htmlScreens";
 import { host, join, leave } from "../collab/client";
 import { Ico } from "./controls";
@@ -125,6 +125,7 @@ function HtmlImport() {
   const [url, setUrl] = useState("https://");
   const [width, setWidth] = useState(390);
   const [split, setSplit] = useState(true);
+  const [run, setRun] = useState(isDesktop);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [picked, setPicked] = useState<File[]>([]);
@@ -163,8 +164,19 @@ function HtmlImport() {
         }
         files = [{ name: new URL(url).hostname + ".html", html: text, baseUrl: url }];
       }
-      if (split) {
-        const r = await importHtmlScreens(files, { width, pageName: files.length > 1 ? "Imported prototype" : files[0].name.replace(/\.html?$/i, ""), onStatus: setStatus });
+      const pageName = files.length > 1 ? "Imported prototype" : files[0].name.replace(/\.html?$/i, "");
+      if (split && run && isDesktop) {
+        let r;
+        try {
+          r = await importCrawled(files, { width, pageName, onStatus: setStatus });
+        } catch (e) {
+          // fall back to reading the markup without running it
+          setStatus(`Couldn't run the prototype (${(e as Error).message}). Reading its markup instead…`);
+          r = await importHtmlScreens(files, { width, pageName, onStatus: setStatus });
+        }
+        toast(`Imported ${r.screens} screens${r.popups ? ` (${r.popups} popups)` : ""} with ${r.links} wired links${"timedOut" in r && r.timedOut ? " · stopped early (very big prototype)" : ""}`);
+      } else if (split) {
+        const r = await importHtmlScreens(files, { width, pageName, onStatus: setStatus });
         toast(`Imported ${r.screens} screens${r.popups ? ` (${r.popups} popups)` : ""} with ${r.links} wired links${r.unresolved ? ` · ${r.unresolved} links pointed nowhere` : ""}`);
       } else {
         for (const f of files) await importHtml(f.html, { width, baseUrl: f.baseUrl, name: f.name.replace(/\.html?$/i, "") });
@@ -222,6 +234,12 @@ function HtmlImport() {
         <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />
         Split into screens and popups, and wire up the buttons and links between them
       </label>
+      {split && isDesktop && (
+        <label className="opt">
+          <input type="checkbox" checked={run} onChange={(e) => setRun(e.target.checked)} />
+          Run the prototype and click through it to find every screen (best for pages built with JavaScript; takes up to a few minutes)
+        </label>
+      )}
       <div className="imp-row end">
         <button type="button" className="primary" disabled={busy} onClick={go}>{busy ? "Importing…" : split ? "Import as wired screens" : "Import as an editable screen"}</button>
       </div>

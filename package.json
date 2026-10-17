@@ -1,7 +1,7 @@
 {
   "name": "freakma",
   "productName": "Freakma",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Desktop design tool: drag-and-drop web and mobile screens, with Claude Code built in.",
   "main": "electron/main.cjs",
   "private": true,

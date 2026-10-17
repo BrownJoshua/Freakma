@@ -32,6 +32,17 @@ export interface Bridge {
   refsData(id: string): Promise<string | null>;
   refsToProject(id: string, dir: string): Promise<string>;
   openPreview(): Promise<void>;
+  crawlHtml(files: { name: string; html: string }[], opts: { width: number }): Promise<CrawlResult>;
+  onCrawlProgress(cb: (text: string) => void): () => void;
+}
+
+export interface CrawlResult {
+  /** file:// folder the pages ran from (for images their scripts point at) */
+  base: string;
+  states: { key: string; name: string; file: string; html: string; overlay: boolean }[];
+  /** clicking element data-fk-c="click" on state `from` leads to state `to` */
+  links: { from: number; click: number; to: number }[];
+  timedOut: boolean;
 }
 
 export interface RefMeta {
