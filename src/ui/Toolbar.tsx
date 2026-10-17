@@ -48,6 +48,7 @@ export function Toolbar({ onExport }: { onExport: () => void }) {
               <button type="button" onClick={() => setState({ dialog: "import" })}><Ico name="upload" />Import from Figma or HTML…</button>
               <button type="button" onClick={onExport}><Ico name="share" />Export screens…</button>
               <button type="button" onClick={() => setState({ dialog: "share" })}><Ico name="users" />Work together live…</button>
+              <small className="menu-h">Freakma {__APP_VERSION__}</small>
             </div>
           )}
         </div>

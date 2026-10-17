@@ -576,7 +576,7 @@ function ClaudeTab() {
   const [useSel, setUseSel] = useState(true);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<LogLine[]>([]);
-  const [check, setCheck] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
+  const [check, setCheck] = useState<{ ok: boolean; version?: string; error?: string; path?: string } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const draft = useStore((s) => s.claudeDraft);
   useEffect(() => {
@@ -610,10 +610,17 @@ function ClaudeTab() {
   if (check && !check.ok) {
     return (
       <div className="nothing">
-        <h3>Claude Code not found</h3>
-        <p>Install Claude Code, then open a terminal and run <code>claude</code> once to sign in. Restart Freakma afterwards.</p>
-        <p className="hint">{check.error}</p>
-        <button type="button" className="wide" onClick={() => bridge!.claudeCheck().then(setCheck)}>Check again</button>
+        <h3>{check.path ? "Claude Code didn't start" : "Claude Code not found"}</h3>
+        <p className="hint claude-err">{check.error}</p>
+        {navigator.userAgent.includes("Windows") && <ol className="steps">
+          <li>Open <b>PowerShell</b> and run <code>irm https://claude.ai/install.ps1 | iex</code></li>
+          <li>Close PowerShell, open a new one, type <code>claude</code> and sign in with your Claude account.</li>
+          <li>If it asks for Git, install <b>Git for Windows</b> (git-scm.com) too.</li>
+          <li>Come back here and press <b>Check again</b>.</li>
+        </ol>}
+        <button type="button" className="wide primary" onClick={() => { setCheck(null); bridge!.claudeCheck().then(setCheck); }}>Check again</button>
+        <button type="button" className="wide" onClick={async () => { if (await bridge!.claudeLocate()) setCheck(await bridge!.claudeCheck()); }}><Ico name="folder" />Locate claude.exe…</button>
+        <p className="hint">Usually it's in <code>C:\Users\&lt;you&gt;\.local\bin\claude.exe</code> or <code>…\AppData\Roaming\npm\claude.cmd</code>.</p>
       </div>
     );
   }
@@ -649,7 +656,7 @@ function ClaudeTab() {
 
   return (
     <div className="claude">
-      <p className="hint">Connected to Claude Code{check?.version ? ` ${check.version}` : ""} · project: <code>{dir}</code></p>
+      <p className="hint">{check ? <>Connected to Claude Code{check.version ? ` ${check.version}` : ""}</> : "Checking Claude Code…"} · project: <code>{dir}</code></p>
       <div className="log" ref={logRef}>
         {log.length === 0 && <p className="hint">Ask for a screen, a change, or a whole flow. Claude edits the design file and the canvas updates when it's done.</p>}
         {log.map((l, i) => (

@@ -113,15 +113,119 @@ ipcMain.handle("reveal", async (_e, p) => shell.showItemInFolder(p));
  * The prompt goes in on stdin so nothing the user types is ever parsed by a shell. */
 
 const isWin = process.platform === "win32";
+const os = require("os");
 
-ipcMain.handle("claude-check", async () =>
-  new Promise((resolve) => {
-    execFile("claude", ["--version"], { shell: isWin, timeout: 15000 }, (err, stdout) => {
-      if (err) resolve({ ok: false, error: err.code === "ENOENT" || /not recognized|not found/i.test(String(err.message)) ? "The `claude` command was not found on PATH." : String(err.message) });
-      else resolve({ ok: true, version: String(stdout).trim() });
+/* Finding the claude command. Windows is the tricky part: an app started from the desktop keeps
+ * the PATH Explorer had at login, so a Claude Code installed later isn't on it; npm installs a
+ * .cmd shim; the native installer uses ~/.local/bin. So: a path the user picked, else search the
+ * live PATH (read from the registry) plus the usual install folders. */
+const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
+const readSettings = () => {
+  try {
+    return JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
+  } catch {
+    return {};
+  }
+};
+const writeSettings = (patch) => fs.writeFileSync(settingsFile(), JSON.stringify({ ...readSettings(), ...patch }, null, 1));
+
+let livePath = null;
+function searchPath() {
+  const dirs = (process.env.PATH || "").split(path.delimiter);
+  const home = os.homedir();
+  if (isWin) {
+    if (livePath === null) {
+      try {
+        livePath = require("child_process").execFileSync(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"],
+          { encoding: "utf8", windowsHide: true, timeout: 8000 },
+        ).trim();
+      } catch {
+        livePath = "";
+      }
+    }
+    dirs.push(...livePath.split(";"));
+    const appData = process.env.APPDATA || path.join(home, "AppData", "Roaming");
+    const local = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    dirs.push(path.join(home, ".local", "bin"), path.join(appData, "npm"), path.join(home, ".claude", "local"), path.join(local, "Programs", "claude"), path.join(local, "Microsoft", "WinGet", "Links"));
+  } else {
+    dirs.push(path.join(home, ".local", "bin"), path.join(home, ".claude", "local"), "/usr/local/bin", "/opt/homebrew/bin", path.join(home, ".npm-global", "bin"));
+  }
+  return [...new Set(dirs.map((d) => d.trim().replace(/^"|"$/g, "")).filter(Boolean))];
+}
+
+function findClaude() {
+  const picked = readSettings().claudePath;
+  if (picked && fs.existsSync(picked)) return picked;
+  const names = isWin ? ["claude.exe", "claude.cmd", "claude.bat", "claude"] : ["claude"];
+  for (const d of searchPath())
+    for (const n of names) {
+      const p = path.join(d, n);
+      try {
+        if (fs.statSync(p).isFile()) return p;
+      } catch {}
+    }
+  return null;
+}
+
+/** the environment Claude runs in: the full PATH, and Git Bash (Claude Code on Windows needs it) */
+function claudeEnv() {
+  const env = { ...process.env, PATH: searchPath().join(path.delimiter) };
+  if (isWin && !env.CLAUDE_CODE_GIT_BASH_PATH) {
+    const pf = [process.env.ProgramFiles, process.env["ProgramFiles(x86)"], path.join(os.homedir(), "AppData", "Local", "Programs")].filter(Boolean);
+    for (const base of pf) {
+      const b = path.join(base, "Git", "bin", "bash.exe");
+      if (fs.existsSync(b)) {
+        env.CLAUDE_CODE_GIT_BASH_PATH = b;
+        break;
+      }
+    }
+  }
+  return env;
+}
+
+/** run the claude binary; .cmd/.bat shims need a shell on Windows (and a quoted path) */
+function spawnClaude(bin, args, opts) {
+  if (isWin && /\.(cmd|bat)$/i.test(bin)) return spawn(`"${bin}"`, args, { ...opts, shell: true });
+  return spawn(bin, args, { ...opts, shell: false });
+}
+
+ipcMain.handle("claude-check", async () => {
+  const bin = findClaude();
+  if (!bin)
+    return {
+      ok: false,
+      error: isWin
+        ? "Freakma couldn't find claude.exe. Install it in PowerShell with:  irm https://claude.ai/install.ps1 | iex  then run  claude  once to sign in, and restart Freakma. If it's installed somewhere unusual, use “Locate claude.exe…”."
+        : "The `claude` command was not found. Install Claude Code, run `claude` once to sign in, and restart Freakma.",
+    };
+  return new Promise((resolve) => {
+    const p = spawnClaude(bin, ["--version"], { env: claudeEnv(), windowsHide: true });
+    let out = "", err = "";
+    const t = setTimeout(() => (p.kill(), resolve({ ok: false, path: bin, error: "claude --version took too long to answer." })), 20000);
+    p.stdout.on("data", (d) => (out += d));
+    p.stderr.on("data", (d) => (err += d));
+    p.on("error", (e) => (clearTimeout(t), resolve({ ok: false, path: bin, error: `Found ${bin} but could not start it: ${e.message}` })));
+    p.on("close", (code) => {
+      clearTimeout(t);
+      if (code === 0) resolve({ ok: true, version: out.trim(), path: bin });
+      else resolve({ ok: false, path: bin, error: `Found ${bin} but it failed (exit ${code}): ${(err || out).trim().slice(0, 600)}` });
     });
-  }),
-);
+  });
+});
+
+ipcMain.handle("claude-locate", async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: "Find the claude program",
+    properties: ["openFile"],
+    filters: isWin ? [{ name: "Claude Code", extensions: ["exe", "cmd", "bat"] }] : [],
+    defaultPath: path.join(os.homedir(), ".local", "bin"),
+  });
+  if (r.canceled) return null;
+  writeSettings({ claudePath: r.filePaths[0] });
+  return r.filePaths[0];
+});
 
 const send = (ev) => win && win.webContents.send("claude-event", ev);
 
@@ -135,7 +239,9 @@ ipcMain.handle("claude-run", async (_e, dir, prompt, opts) => {
   if (claude) throw new Error("Claude is already working");
   const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Glob,Grep"];
   if (opts && opts.continue) args.push("--continue");
-  claude = spawn("claude", args, { cwd: dir, shell: isWin, env: process.env, windowsHide: true });
+  const bin = findClaude();
+  if (!bin) throw new Error("Claude Code was not found. Open the Claude tab and use “Locate claude.exe…”.");
+  claude = spawnClaude(bin, args, { cwd: dir, env: claudeEnv(), windowsHide: true });
   send({ kind: "text", text: "Claude Code started…" });
   let buf = "";
   let finished = false;

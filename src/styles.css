@@ -414,3 +414,4 @@ body.dragging-part, body.dragging-part * { cursor: grabbing !important; user-sel
   .tb-group > .menu-wrap > button:not(.primary) { font-size: 0; gap: 0; padding: 0 8px; }
   .tools button { width: 26px; }
 }
+.steps { padding-left: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; } .steps code { font-size: 10.5px; } .claude-err { color: #f5c26b; word-break: break-word; }

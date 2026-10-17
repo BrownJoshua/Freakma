@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("freakma", {
   writeExport: (dir, name, data, base64) => ipcRenderer.invoke("write-export", dir, name, data, base64),
   reveal: (p) => ipcRenderer.invoke("reveal", p),
   claudeCheck: () => ipcRenderer.invoke("claude-check"),
+  claudeLocate: () => ipcRenderer.invoke("claude-locate"),
   claudeRun: (dir, prompt, opts) => ipcRenderer.invoke("claude-run", dir, prompt, opts),
   claudeStop: () => ipcRenderer.invoke("claude-stop"),
   onClaude: on("claude-event"),

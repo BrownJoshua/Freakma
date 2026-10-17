@@ -16,7 +16,8 @@ export interface Bridge {
   onFileChanged(cb: () => void): () => void;
   writeExport(dir: string, name: string, data: string, base64: boolean): Promise<string>;
   reveal(path: string): Promise<void>;
-  claudeCheck(): Promise<{ ok: boolean; version?: string; error?: string }>;
+  claudeCheck(): Promise<{ ok: boolean; version?: string; error?: string; path?: string }>;
+  claudeLocate(): Promise<string | null>;
   claudeRun(dir: string, prompt: string, opts: { continue: boolean }): Promise<void>;
   claudeStop(): Promise<void>;
   onClaude(cb: (e: ClaudeEvent) => void): () => void;
@@ -53,3 +54,8 @@ export interface RefMeta {
 export const bridge: Bridge | null = typeof window === "undefined" ? null : (window as unknown as { freakma?: Bridge }).freakma ?? null;
 export const isDesktop = !!bridge;
 export const PROJECT_FILE = "design.freakma.json";
+
+/** the app version, from package.json (set at build time) */
+declare global {
+  const __APP_VERSION__: string;
+}
